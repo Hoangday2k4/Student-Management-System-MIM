@@ -1,0 +1,103 @@
+﻿<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>Tóm tắt dự án Quản lý sinh viên</title>
+  <style>
+    body { font-family: "Times New Roman", serif; font-size: 14pt; line-height: 1.4; }
+    h1, h2 { color: #0b6b3a; }
+    h1 { font-size: 22pt; }
+    h2 { font-size: 16pt; margin-top: 18px; }
+    ul { margin-top: 6px; }
+    a { color: #0b5db3; }
+  </style>
+</head>
+<body>
+  <h1>TÓM TẮT DỰ ÁN: STUDENT MANAGEMENT SYSTEM</h1>
+
+  <h2>1. Mục tiêu</h2>
+  <p>
+    Xây dựng hệ thống quản lý sinh viên theo giao diện cổng thông tin đào tạo, tập trung vào các nghiệp vụ chính:
+    quản lý hồ sơ sinh viên/giáo viên, quản lý môn học, đăng ký lớp học phần, nhập điểm, xem điểm và thời khóa biểu.
+  </p>
+
+  <h2>2. Công nghệ sử dụng</h2>
+  <ul>
+    <li>Frontend: Vue 3 + Vite</li>
+    <li>Backend: PHP 8.x (chạy bằng <b>php -S localhost:8000</b>)</li>
+    <li>Cơ sở dữ liệu: SQLite (file trong <b>api/storage</b>)</li>
+    <li>API: REST dạng PHP route file</li>
+  </ul>
+
+  <h2>3. Vai trò người dùng</h2>
+  <ul>
+    <li><b>Admin</b>: quản trị đầy đủ, có quyền reset mật khẩu.</li>
+    <li><b>Manager</b>: gần giống Admin, không có quyền reset mật khẩu.</li>
+    <li><b>Teacher</b>: quản lý hồ sơ cá nhân, xem môn được phân công, nhập điểm.</li>
+    <li><b>Student</b>: quản lý hồ sơ cá nhân, xem môn theo học, xem điểm, xem thời khóa biểu.</li>
+  </ul>
+
+  <h2>4. Chức năng đã triển khai</h2>
+  <ul>
+    <li>Đăng nhập/đăng xuất, đổi mật khẩu, quên mật khẩu và luồng admin reset về mật khẩu mặc định.</li>
+    <li>Quản lý sinh viên: tạo mới, cập nhật, tìm kiếm, xem chi tiết, xóa, import hàng loạt từ CSV/XLSX.</li>
+    <li>Quản lý giáo viên: tạo mới, cập nhật, tìm kiếm, xem chi tiết, xóa, import hàng loạt từ CSV/XLSX.</li>
+    <li>Quản lý môn học/lớp học phần: tạo mới, cập nhật, tìm kiếm, xem chi tiết, xóa.</li>
+    <li>Cập nhật danh sách sinh viên lớp học phần từ file; kiểm tra trùng/lỗi và thống kê số dòng thêm/bỏ qua.</li>
+    <li>Nhập điểm theo thành phần CC/GK/CK cho giáo viên; tính tổng điểm theo tỷ lệ.</li>
+    <li>Sinh viên xem điểm cá nhân, điểm chữ và GPA trung bình các môn đã có điểm.</li>
+    <li>Thời khóa biểu sinh viên theo tiết/thứ, parse định dạng lịch học dạng <b>T2-(1-3)</b>.</li>
+    <li>Kiểm tra trùng phòng học khi tạo/cập nhật lớp.</li>
+    <li>Kiểm tra trùng lịch học của sinh viên khi thêm vào lớp.</li>
+  </ul>
+
+  <h2>5. Database</h2>
+  <p>
+    Sơ đồ ERD tổng quan của hệ thống được lưu tại link Mermaid sau:
+  </p>
+  <p>
+    <a href="https://mermaid.ai/d/cebfcb7c-69e4-4f4d-b097-055c7c4c2162">https://mermaid.ai/d/cebfcb7c-69e4-4f4d-b097-055c7c4c2162</a>
+  </p>
+
+  <h2>6. Chuẩn hóa cơ sở dữ liệu</h2>
+  <p>
+    Dự án đã bổ sung migrate chuẩn hóa theo mô hình ERD (tách account, department, class, course section, enrollment, score...)
+    để dễ mở rộng và đảm bảo toàn vẹn dữ liệu.
+  </p>
+  <ul>
+    <li>Script migrate: <b>api/storage/migrate_normalized_schema.php</b></li>
+    <li>Bảng chuẩn hóa chính: <b>accounts, departments, classes, course_sections, enrollments, scores, device_transactions</b></li>
+    <li>Đã đồng bộ dữ liệu từ schema cũ sang schema mới, đồng thời giữ tương thích ngược để không vỡ chức năng hiện tại.</li>
+  </ul>
+
+  <h2>7. Refactor đã thực hiện</h2>
+  <ul>
+    <li>Module môn học/đăng ký/điểm đã refactor sang dùng bảng chuẩn hóa (<b>course_sections, enrollments, scores</b>).</li>
+    <li>Giữ interface API cũ để frontend đang dùng không bị ảnh hưởng ngay.</li>
+    <li>Đã lint kiểm tra cú pháp các file backend quan trọng sau refactor.</li>
+  </ul>
+
+  <h2>8. Cấu trúc thư mục chính</h2>
+  <ul>
+    <li><b>STD-WEB/fe</b>: mã nguồn frontend Vue</li>
+    <li><b>STD-WEB/api</b>: mã nguồn backend PHP + route + model + controller</li>
+    <li><b>STD-WEB/api/storage</b>: SQLite DB và script migrate</li>
+  </ul>
+
+  <h2>9. Cách chạy dự án</h2>
+  <ul>
+    <li>Backend: vào thư mục <b>STD-WEB/api</b>, chạy <b>php -S localhost:8000</b></li>
+    <li>Frontend: vào thư mục <b>STD-WEB/fe</b>, chạy <b>npm run dev</b> (hoặc pnpm tương ứng)</li>
+    <li>Truy cập giao diện tại cổng frontend (mặc định Vite: 5173).</li>
+  </ul>
+
+  <h2>10. Định hướng tiếp theo</h2>
+  <ul>
+    <li>Refactor tiếp Student/Teacher controller để dùng hoàn toàn bảng chuẩn hóa mới.</li>
+    <li>Bổ sung test tự động cho API quan trọng (auth, enrollments, scores, import).</li>
+    <li>Bổ sung phân trang phía server cho dữ liệu lớn.</li>
+    <li>Tách rõ migration version để quản lý thay đổi schema theo từng đợt.</li>
+  </ul>
+
+  <p><i>Cập nhật: 2026-03-28</i></p>
+</body>
+</html>
