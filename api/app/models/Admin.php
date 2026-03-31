@@ -1,4 +1,5 @@
 <?php
+
 class Admin
 {
     public static function ensureSchema(?PDO $pdo = null): void
@@ -8,47 +9,81 @@ class Admin
         }
 
         $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS admins (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                login_id TEXT UNIQUE,
-                password TEXT,
-                name TEXT,
-                account_type TEXT NOT NULL DEFAULT "staff",
-                active_flag INTEGER DEFAULT 1,
-                reset_password_token TEXT,
-                updated DATETIME,
-                created DATETIME DEFAULT CURRENT_TIMESTAMP
+            'CREATE TABLE IF NOT EXISTS TaiKhoan (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                LoginId TEXT NOT NULL UNIQUE,
+                MatKhau TEXT NOT NULL,
+                HoTen TEXT,
+                LoaiTaiKhoan TEXT NOT NULL DEFAULT "student",
+                TrangThai INTEGER NOT NULL DEFAULT 1,
+                ResetToken TEXT,
+                Updated TEXT,
+                Created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )'
         );
 
-        $columns = $pdo->query('PRAGMA table_info(admins)')->fetchAll();
-        $existing = [];
-        foreach ($columns as $column) {
-            $existing[$column['name']] = true;
+        self::seedBaseAccounts($pdo);
+        self::seedFromPeopleTables($pdo);
+    }
+
+    private static function seedBaseAccounts(PDO $pdo): void
+    {
+        $stmt = $pdo->prepare(
+            'INSERT OR IGNORE INTO TaiKhoan (LoginId, MatKhau, HoTen, LoaiTaiKhoan, TrangThai, Created)
+             VALUES (:login_id, :password, :name, :account_type, 1, CURRENT_TIMESTAMP)'
+        );
+
+        $stmt->execute([
+            ':login_id' => 'admin',
+            ':password' => '123456',
+            ':name' => 'admin',
+            ':account_type' => 'staff',
+        ]);
+        $stmt->execute([
+            ':login_id' => 'manager',
+            ':password' => '123456',
+            ':name' => 'manager',
+            ':account_type' => 'staff',
+        ]);
+    }
+
+    private static function seedFromPeopleTables(PDO $pdo): void
+    {
+        if ($pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='SinhVien'")->fetchColumn()) {
+            $rows = $pdo->query('SELECT MaSV, HoTen FROM SinhVien')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $stmt = $pdo->prepare(
+                'INSERT OR IGNORE INTO TaiKhoan (LoginId, MatKhau, HoTen, LoaiTaiKhoan, TrangThai, Created)
+                 VALUES (:login_id, "123456", :name, "student", 1, CURRENT_TIMESTAMP)'
+            );
+            foreach ($rows as $row) {
+                $login = trim((string)($row['MaSV'] ?? ''));
+                if ($login === '') {
+                    continue;
+                }
+                $stmt->execute([
+                    ':login_id' => $login,
+                    ':name' => trim((string)($row['HoTen'] ?? '')),
+                ]);
+            }
         }
 
-        if (!isset($existing['name'])) {
-            $pdo->exec('ALTER TABLE admins ADD COLUMN name TEXT');
+        if ($pdo->query("SELECT 1 FROM sqlite_master WHERE type='table' AND name='GiangVien'")->fetchColumn()) {
+            $rows = $pdo->query('SELECT MaGV, HoTen FROM GiangVien')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $stmt = $pdo->prepare(
+                'INSERT OR IGNORE INTO TaiKhoan (LoginId, MatKhau, HoTen, LoaiTaiKhoan, TrangThai, Created)
+                 VALUES (:login_id, "123456", :name, "teacher", 1, CURRENT_TIMESTAMP)'
+            );
+            foreach ($rows as $row) {
+                $login = trim((string)($row['MaGV'] ?? ''));
+                if ($login === '') {
+                    continue;
+                }
+                $stmt->execute([
+                    ':login_id' => $login,
+                    ':name' => trim((string)($row['HoTen'] ?? '')),
+                ]);
+            }
         }
-        if (!isset($existing['active_flag'])) {
-            $pdo->exec('ALTER TABLE admins ADD COLUMN active_flag INTEGER DEFAULT 1');
-        }
-        if (!isset($existing['reset_password_token'])) {
-            $pdo->exec('ALTER TABLE admins ADD COLUMN reset_password_token TEXT');
-        }
-        if (!isset($existing['updated'])) {
-            $pdo->exec('ALTER TABLE admins ADD COLUMN updated DATETIME');
-        }
-        if (!isset($existing['created'])) {
-            $pdo->exec('ALTER TABLE admins ADD COLUMN created DATETIME DEFAULT CURRENT_TIMESTAMP');
-        }
-        if (!isset($existing['account_type'])) {
-            $pdo->exec('ALTER TABLE admins ADD COLUMN account_type TEXT NOT NULL DEFAULT "student"');
-        }
-
-        // backfill account_type for legacy data
-        $pdo->exec("UPDATE admins SET account_type = 'staff' WHERE lower(login_id) IN ('admin', 'manager')");
-        $pdo->exec("UPDATE admins SET account_type = 'student' WHERE account_type IS NULL OR trim(account_type) = ''");
     }
 
     public static function verifyPassword(string $loginId, string $password): bool
@@ -56,10 +91,10 @@ class Admin
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'SELECT id FROM admins
-             WHERE lower(login_id) = lower(:login_id)
-               AND active_flag = 1
-               AND (password = :password_plain OR password = :password_md5)
+            'SELECT Id FROM TaiKhoan
+             WHERE lower(LoginId) = lower(:login_id)
+               AND TrangThai = 1
+               AND (MatKhau = :password_plain OR MatKhau = :password_md5)
              LIMIT 1'
         );
         $stmt->execute([
@@ -67,14 +102,15 @@ class Admin
             ':password_plain' => $password,
             ':password_md5' => md5($password),
         ]);
-        return (bool) $stmt->fetch();
+        return (bool)$stmt->fetch();
     }
 
     public static function createAccountWithPdo(PDO $pdo, string $loginId, string $password, string $name = '', string $accountType = 'student'): int
     {
+        self::ensureSchema($pdo);
         $stmt = $pdo->prepare(
-            'INSERT INTO admins (login_id, password, name, account_type, active_flag)
-             VALUES (:login_id, :password, :name, :account_type, 1)'
+            'INSERT INTO TaiKhoan (LoginId, MatKhau, HoTen, LoaiTaiKhoan, TrangThai, Created)
+             VALUES (:login_id, :password, :name, :account_type, 1, CURRENT_TIMESTAMP)'
         );
         $stmt->execute([
             ':login_id' => $loginId,
@@ -90,11 +126,11 @@ class Admin
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'UPDATE admins
-             SET password = :password,
-                 reset_password_token = NULL,
-                 updated = datetime("now", "localtime")
-             WHERE lower(login_id) = lower(:login_id)'
+            'UPDATE TaiKhoan
+             SET MatKhau = :password,
+                 ResetToken = NULL,
+                 Updated = datetime("now", "localtime")
+             WHERE lower(LoginId) = lower(:login_id)'
         );
         $stmt->execute([
             ':password' => $newPassword,
@@ -108,10 +144,10 @@ class Admin
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'UPDATE admins
-             SET name = :name,
-                 updated = datetime(\"now\", \"localtime\")
-             WHERE lower(login_id) = lower(:login_id)'
+            'UPDATE TaiKhoan
+             SET HoTen = :name,
+                 Updated = datetime("now", "localtime")
+             WHERE lower(LoginId) = lower(:login_id)'
         );
         $stmt->execute([
             ':name' => $name,
@@ -124,7 +160,7 @@ class Admin
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $stmt = $pdo->query('SELECT id, name FROM admins LIMIT 100');
+        $stmt = $pdo->query('SELECT Id AS id, HoTen AS name FROM TaiKhoan LIMIT 100');
         return $stmt->fetchAll();
     }
 
@@ -132,7 +168,21 @@ class Admin
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $stmt = $pdo->prepare('SELECT * FROM admins WHERE lower(login_id) = lower(:login_id) LIMIT 1');
+        $stmt = $pdo->prepare(
+            'SELECT
+                Id AS id,
+                LoginId AS login_id,
+                MatKhau AS password,
+                HoTen AS name,
+                LoaiTaiKhoan AS account_type,
+                TrangThai AS active_flag,
+                ResetToken AS reset_password_token,
+                Updated AS updated,
+                Created AS created
+             FROM TaiKhoan
+             WHERE lower(LoginId) = lower(:login_id)
+             LIMIT 1'
+        );
         $stmt->execute([':login_id' => $loginId]);
         return $stmt->fetch();
     }
@@ -141,7 +191,21 @@ class Admin
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $stmt = $pdo->prepare('SELECT * FROM admins WHERE id = :id LIMIT 1');
+        $stmt = $pdo->prepare(
+            'SELECT
+                Id AS id,
+                LoginId AS login_id,
+                MatKhau AS password,
+                HoTen AS name,
+                LoaiTaiKhoan AS account_type,
+                TrangThai AS active_flag,
+                ResetToken AS reset_password_token,
+                Updated AS updated,
+                Created AS created
+             FROM TaiKhoan
+             WHERE Id = :id
+             LIMIT 1'
+        );
         $stmt->execute([':id' => $id]);
         return $stmt->fetch();
     }
@@ -151,9 +215,9 @@ class Admin
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'SELECT login_id, name, account_type
-             FROM admins
-             WHERE lower(login_id) = lower(:login_id)
+            'SELECT LoginId AS login_id, HoTen AS name, LoaiTaiKhoan AS account_type
+             FROM TaiKhoan
+             WHERE lower(LoginId) = lower(:login_id)
              LIMIT 1'
         );
         $stmt->execute([':login_id' => $loginId]);
@@ -165,7 +229,7 @@ class Admin
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $stmt = $pdo->prepare('UPDATE admins SET reset_password_token = :token WHERE id = :id');
+        $stmt = $pdo->prepare('UPDATE TaiKhoan SET ResetToken = :token WHERE Id = :id');
         $stmt->execute([
             ':token' => $token,
             ':id' => $adminId,
@@ -177,12 +241,12 @@ class Admin
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->query(
-            "SELECT id, name, login_id, reset_password_token, account_type
-             FROM admins
-             WHERE reset_password_token IS NOT NULL
-               AND reset_password_token != ''
-               AND account_type IN ('student', 'teacher')
-             ORDER BY id ASC"
+            "SELECT Id AS id, HoTen AS name, LoginId AS login_id, ResetToken AS reset_password_token, LoaiTaiKhoan AS account_type
+             FROM TaiKhoan
+             WHERE ResetToken IS NOT NULL
+               AND ResetToken != ''
+               AND LoaiTaiKhoan IN ('student', 'teacher')
+             ORDER BY Id ASC"
         );
         return $stmt->fetchAll();
     }
@@ -192,9 +256,9 @@ class Admin
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'UPDATE admins
-             SET password = :password, reset_password_token = NULL
-             WHERE id = :id'
+            'UPDATE TaiKhoan
+             SET MatKhau = :password, ResetToken = NULL
+             WHERE Id = :id'
         );
         $stmt->execute([
             ':password' => $newPassword,
@@ -202,3 +266,4 @@ class Admin
         ]);
     }
 }
+

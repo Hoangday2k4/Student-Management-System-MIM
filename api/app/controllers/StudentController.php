@@ -209,7 +209,7 @@ class StudentController
         } catch (PDOException $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
             $message = (string)$e->getMessage();
-            if (strpos($message, 'UNIQUE constraint failed: students.student_code') !== false) {
+            if (strpos($message, 'UNIQUE constraint failed: SinhVien.MaSV') !== false) {
                 jsonResponse([
                     'status' => 'error',
                     'message' => 'Ma so sinh vien da ton tai.',
@@ -217,7 +217,7 @@ class StudentController
                 ], 409);
                 return;
             }
-            if (strpos($message, 'UNIQUE constraint failed: admins.login_id') !== false) {
+            if (strpos($message, 'UNIQUE constraint failed: TaiKhoan.LoginId') !== false) {
                 jsonResponse([
                     'status' => 'error',
                     'message' => 'Tai khoan dang nhap trung login id da ton tai.',
@@ -563,11 +563,11 @@ class StudentController
             $existingStudents = [];
             $existingLogins = [];
 
-            $studentCodes = $pdo->query('SELECT student_code FROM students')->fetchAll(PDO::FETCH_COLUMN);
+            $studentCodes = $pdo->query('SELECT MaSV FROM SinhVien')->fetchAll(PDO::FETCH_COLUMN);
             foreach ($studentCodes as $code) {
                 $existingStudents[strtolower(trim((string)$code))] = true;
             }
-            $loginIds = $pdo->query('SELECT login_id FROM admins')->fetchAll(PDO::FETCH_COLUMN);
+            $loginIds = $pdo->query('SELECT LoginId FROM TaiKhoan')->fetchAll(PDO::FETCH_COLUMN);
             foreach ($loginIds as $loginId) {
                 $existingLogins[strtolower(trim((string)$loginId))] = true;
             }
@@ -826,7 +826,7 @@ class StudentController
             Student::ensureSchema($pdo);
             Admin::ensureSchema($pdo);
 
-            $stmt = $pdo->prepare('SELECT * FROM students WHERE student_code = :code LIMIT 1');
+            $stmt = $pdo->prepare('SELECT * FROM SinhVien WHERE MaSV = :code LIMIT 1');
             $stmt->execute([':code' => $oldCode]);
             $current = $stmt->fetch();
             if (!$current) {
@@ -837,14 +837,14 @@ class StudentController
             $pdo->beginTransaction();
 
             if (strtolower($newCode) !== strtolower($oldCode)) {
-                $stmt = $pdo->prepare('SELECT 1 FROM students WHERE student_code = :code LIMIT 1');
+                $stmt = $pdo->prepare('SELECT 1 FROM SinhVien WHERE MaSV = :code LIMIT 1');
                 $stmt->execute([':code' => $newCode]);
                 if ($stmt->fetch()) {
                     $pdo->rollBack();
                     jsonResponse(['status' => 'error', 'message' => 'Mã số sinh viên đã tồn tại.', 'fields' => ['student_code' => 'Mã số sinh viên đã tồn tại.']], 409);
                     return;
                 }
-                $stmt = $pdo->prepare('SELECT 1 FROM admins WHERE lower(login_id)=lower(:login_id) AND lower(login_id)<>lower(:old) LIMIT 1');
+                $stmt = $pdo->prepare('SELECT 1 FROM TaiKhoan WHERE lower(LoginId)=lower(:login_id) AND lower(LoginId)<>lower(:old) LIMIT 1');
                 $stmt->execute([':login_id' => $newCode, ':old' => $oldCode]);
                 if ($stmt->fetch()) {
                     $pdo->rollBack();
@@ -854,17 +854,16 @@ class StudentController
             }
 
             $stmt = $pdo->prepare(
-                'UPDATE students SET
-                    student_code = :new_code,
-                    full_name = :full_name,
-                    date_of_birth = :date_of_birth,
-                    gender = :gender,
-                    class_name = :class_name,
-                    faculty = :faculty,
-                    email = :email,
-                    phone = :phone,
-                    status = :status
-                 WHERE student_code = :old_code'
+                'UPDATE SinhVien SET
+                    MaSV = :new_code,
+                    HoTen = :full_name,
+                    NgaySinh = :date_of_birth,
+                    GioiTinh = :gender,
+                    MaLop = :class_name,
+                    Email = :email,
+                    SoDienThoai = :phone,
+                    TrangThai = :status
+                 WHERE MaSV = :old_code'
             );
             $stmt->execute([
                 ':new_code' => $newCode,
@@ -872,7 +871,6 @@ class StudentController
                 ':date_of_birth' => $dateOfBirth ?: null,
                 ':gender' => $gender,
                 ':class_name' => $className,
-                ':faculty' => $faculty ?: null,
                 ':email' => $email ?: null,
                 ':phone' => $phone ?: null,
                 ':status' => $status,
@@ -880,14 +878,12 @@ class StudentController
             ]);
 
             if (strtolower($newCode) !== strtolower($oldCode)) {
-                $stmt = $pdo->prepare('UPDATE course_enrollments SET student_code = :new_code WHERE student_code = :old_code');
+                $stmt = $pdo->prepare('UPDATE KetQuaHocTap SET MaSV = :new_code WHERE MaSV = :old_code');
                 $stmt->execute([':new_code' => $newCode, ':old_code' => $oldCode]);
-                $stmt = $pdo->prepare('UPDATE course_scores SET student_code = :new_code WHERE student_code = :old_code');
-                $stmt->execute([':new_code' => $newCode, ':old_code' => $oldCode]);
-                $stmt = $pdo->prepare('UPDATE admins SET login_id = :new_code WHERE lower(login_id)=lower(:old_code)');
+                $stmt = $pdo->prepare('UPDATE TaiKhoan SET LoginId = :new_code WHERE lower(LoginId)=lower(:old_code)');
                 $stmt->execute([':new_code' => $newCode, ':old_code' => $oldCode]);
             }
-            $stmt = $pdo->prepare('UPDATE admins SET name = :name WHERE lower(login_id)=lower(:login_id)');
+            $stmt = $pdo->prepare('UPDATE TaiKhoan SET HoTen = :name WHERE lower(LoginId)=lower(:login_id)');
             $stmt->execute([':name' => $fullName, ':login_id' => $newCode]);
 
             $pdo->commit();
@@ -924,7 +920,7 @@ class StudentController
             $pdo = get_db_connection();
             Student::ensureSchema($pdo);
             Admin::ensureSchema($pdo);
-            $stmt = $pdo->prepare('SELECT 1 FROM students WHERE student_code = :code LIMIT 1');
+            $stmt = $pdo->prepare('SELECT 1 FROM SinhVien WHERE MaSV = :code LIMIT 1');
             $stmt->execute([':code' => $studentCode]);
             if (!$stmt->fetch()) {
                 jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy sinh viên.'], 404);
@@ -932,13 +928,11 @@ class StudentController
             }
 
             $pdo->beginTransaction();
-            $stmt = $pdo->prepare('DELETE FROM course_scores WHERE student_code = :code');
+            $stmt = $pdo->prepare('DELETE FROM KetQuaHocTap WHERE MaSV = :code');
             $stmt->execute([':code' => $studentCode]);
-            $stmt = $pdo->prepare('DELETE FROM course_enrollments WHERE student_code = :code');
+            $stmt = $pdo->prepare('DELETE FROM SinhVien WHERE MaSV = :code');
             $stmt->execute([':code' => $studentCode]);
-            $stmt = $pdo->prepare('DELETE FROM students WHERE student_code = :code');
-            $stmt->execute([':code' => $studentCode]);
-            $stmt = $pdo->prepare('DELETE FROM admins WHERE lower(login_id)=lower(:code) AND account_type = "student"');
+            $stmt = $pdo->prepare('DELETE FROM TaiKhoan WHERE lower(LoginId)=lower(:code) AND LoaiTaiKhoan = "student"');
             $stmt->execute([':code' => $studentCode]);
             $pdo->commit();
 

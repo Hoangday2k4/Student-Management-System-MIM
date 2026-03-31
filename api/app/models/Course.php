@@ -11,133 +11,94 @@ class Course
         return strtolower($value);
     }
 
-    private static function resolveDepartmentId(PDO $pdo, ?string $department): ?int
+    private static function splitValues(string $raw): array
+    {
+        $parts = explode(',', $raw);
+        $out = [];
+        foreach ($parts as $part) {
+            $v = trim($part);
+            if ($v !== '') {
+                $out[] = $v;
+            }
+        }
+        return $out;
+    }
+
+    private static function parseScheduleItem(string $item): ?array
+    {
+        $raw = strtoupper(trim($item));
+        if (!preg_match('/^T([2-8])-\((\d{1,2})-(\d{1,2})\)$/', $raw, $m)) {
+            return null;
+        }
+        $start = (int)$m[2];
+        $end = (int)$m[3];
+        if ($start <= 0 || $end <= 0 || $start > $end) {
+            return null;
+        }
+        return ['thu' => (int)$m[1], 'ca' => $start . '-' . $end];
+    }
+
+    private static function ensureMapForLhp(PDO $pdo, string $maLHP): int
+    {
+        $stmt = $pdo->prepare('INSERT OR IGNORE INTO LopHocPhanMap (MaLHP) VALUES (:ma)');
+        $stmt->execute([':ma' => $maLHP]);
+        $stmt = $pdo->prepare('SELECT LegacyId FROM LopHocPhanMap WHERE MaLHP = :ma LIMIT 1');
+        $stmt->execute([':ma' => $maLHP]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    private static function getMaLhpByLegacyId(PDO $pdo, int $id): ?string
+    {
+        $stmt = $pdo->prepare('SELECT MaLHP FROM LopHocPhanMap WHERE LegacyId = :id LIMIT 1');
+        $stmt->execute([':id' => $id]);
+        $ma = $stmt->fetchColumn();
+        return $ma !== false ? (string)$ma : null;
+    }
+
+    private static function resolveNganh(PDO $pdo, ?string $department): ?string
     {
         $name = trim((string)$department);
         if ($name === '') {
             return null;
         }
-
-        $stmt = $pdo->prepare('SELECT id FROM departments WHERE lower(department_name) = lower(:name) OR lower(department_code) = lower(:name) LIMIT 1');
+        $stmt = $pdo->prepare('SELECT MaNganh FROM Nganh WHERE lower(TenNganh)=lower(:name) OR lower(MaNganh)=lower(:name) LIMIT 1');
         $stmt->execute([':name' => $name]);
         $id = $stmt->fetchColumn();
-        return $id !== false ? (int)$id : null;
-    }
-
-    private static function resolveTeacherIdByCode(PDO $pdo, ?string $teacherCode): ?int
-    {
-        $code = trim((string)$teacherCode);
-        if ($code === '') {
-            return null;
-        }
-        $stmt = $pdo->prepare('SELECT id FROM teachers WHERE lower(teacher_code) = lower(:code) LIMIT 1');
-        $stmt->execute([':code' => $code]);
-        $id = $stmt->fetchColumn();
-        return $id !== false ? (int)$id : null;
-    }
-
-    private static function resolveStudentIdByCode(PDO $pdo, string $studentCode): ?int
-    {
-        $code = trim($studentCode);
-        if ($code === '') {
-            return null;
-        }
-        $stmt = $pdo->prepare('SELECT id FROM students WHERE lower(student_code) = lower(:code) LIMIT 1');
-        $stmt->execute([':code' => $code]);
-        $id = $stmt->fetchColumn();
-        return $id !== false ? (int)$id : null;
-    }
-
-    private static function firstClassroom(string $classroom): string
-    {
-        $parts = explode(',', $classroom);
-        return trim((string)($parts[0] ?? ''));
-    }
-
-    private static function resolveClassroomId(PDO $pdo, ?string $classroomRaw): ?int
-    {
-        $roomCode = strtoupper(trim(self::firstClassroom((string)$classroomRaw)));
-        if ($roomCode === '') {
-            return null;
-        }
-
-        $stmt = $pdo->prepare('SELECT id FROM classrooms WHERE upper(room_code) = :code LIMIT 1');
-        $stmt->execute([':code' => $roomCode]);
-        $id = $stmt->fetchColumn();
         if ($id !== false) {
-            return (int)$id;
+            return (string)$id;
         }
-
-        $stmt = $pdo->prepare(
-            'INSERT INTO classrooms (room_code, room_name, building, description, avatar, created_at, updated_at)
-             VALUES (:room_code, :room_name, "", "", "", CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)'
-        );
-        $stmt->execute([
-            ':room_code' => $roomCode,
-            ':room_name' => $roomCode,
-        ]);
-        return (int)$pdo->lastInsertId();
+        $code = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $name) ?: 'NGANH');
+        if (strlen($code) > 12) $code = substr($code, 0, 12);
+        $ins = $pdo->prepare('INSERT OR IGNORE INTO Nganh (MaNganh, TenNganh, MoTa) VALUES (:code,:name,NULL)');
+        $ins->execute([':code' => $code, ':name' => $name]);
+        return $code;
     }
 
-    private static function getSectionIdByCourseIdWithPdo(PDO $pdo, int $courseId): ?int
+    private static function buildScheduleClassroom(PDO $pdo, string $maLHP): array
     {
-        $stmt = $pdo->prepare('SELECT id FROM course_sections WHERE course_id = :course_id ORDER BY id ASC LIMIT 1');
-        $stmt->execute([':course_id' => $courseId]);
-        $id = $stmt->fetchColumn();
-        return $id !== false ? (int)$id : null;
-    }
-
-    private static function upsertDefaultSectionWithPdo(PDO $pdo, int $courseId): int
-    {
-        $courseStmt = $pdo->prepare('SELECT id, course_code, teacher_code, schedule, classroom, max_students FROM courses WHERE id = :id LIMIT 1');
-        $courseStmt->execute([':id' => $courseId]);
-        $course = $courseStmt->fetch();
-        if (!$course) {
-            return 0;
+        $stmt = $pdo->prepare('SELECT Thu, CaHoc, PhongHoc FROM ThoiKhoaBieu WHERE MaLHP = :ma ORDER BY Id ASC');
+        $stmt->execute([':ma' => $maLHP]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $schedule = [];
+        $classroom = [];
+        foreach ($rows as $r) {
+            $thu = (int)($r['Thu'] ?? 0);
+            $caRaw = trim((string)($r['CaHoc'] ?? ''));
+            if ($thu > 0 && $caRaw !== '') {
+                if (preg_match('/^\d+$/', $caRaw)) {
+                    $caRaw = $caRaw . '-' . $caRaw;
+                }
+                $schedule[] = 'T' . $thu . '-(' . $caRaw . ')';
+            }
+            $ph = trim((string)($r['PhongHoc'] ?? ''));
+            if ($ph !== '') {
+                $classroom[] = $ph;
+            }
         }
-
-        $sectionId = self::getSectionIdByCourseIdWithPdo($pdo, $courseId);
-        $teacherId = self::resolveTeacherIdByCode($pdo, (string)($course['teacher_code'] ?? ''));
-        $classroomId = self::resolveClassroomId($pdo, (string)($course['classroom'] ?? ''));
-        $sectionCode = trim((string)$course['course_code']) . '-01';
-
-        if ($sectionId === null) {
-            $stmt = $pdo->prepare(
-                'INSERT INTO course_sections (
-                    section_code, course_id, teacher_id, classroom_id, schedule, semester, academic_year, max_students, created_at
-                ) VALUES (
-                    :section_code, :course_id, :teacher_id, :classroom_id, :schedule, NULL, NULL, :max_students, CURRENT_TIMESTAMP
-                )'
-            );
-            $stmt->execute([
-                ':section_code' => $sectionCode,
-                ':course_id' => $courseId,
-                ':teacher_id' => $teacherId,
-                ':classroom_id' => $classroomId,
-                ':schedule' => (string)($course['schedule'] ?? ''),
-                ':max_students' => $course['max_students'] !== null ? (int)$course['max_students'] : null,
-            ]);
-            return (int)$pdo->lastInsertId();
-        }
-
-        $stmt = $pdo->prepare(
-            'UPDATE course_sections
-             SET section_code = :section_code,
-                 teacher_id = :teacher_id,
-                 classroom_id = :classroom_id,
-                 schedule = :schedule,
-                 max_students = :max_students
-             WHERE id = :id'
-        );
-        $stmt->execute([
-            ':section_code' => $sectionCode,
-            ':teacher_id' => $teacherId,
-            ':classroom_id' => $classroomId,
-            ':schedule' => (string)($course['schedule'] ?? ''),
-            ':max_students' => $course['max_students'] !== null ? (int)$course['max_students'] : null,
-            ':id' => $sectionId,
-        ]);
-        return $sectionId;
+        return [
+            'schedule' => implode(', ', $schedule),
+            'classroom' => implode(', ', array_values(array_unique($classroom))),
+        ];
     }
 
     public static function ensureSchema(?PDO $pdo = null): void
@@ -145,228 +106,317 @@ class Course
         if (!$pdo) {
             $pdo = get_db_connection();
         }
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS Nganh (
+                MaNganh TEXT PRIMARY KEY,
+                TenNganh TEXT NOT NULL,
+                MoTa TEXT
+            )'
+        );
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS MonHoc (
+                MaMon TEXT PRIMARY KEY,
+                TenMon TEXT NOT NULL,
+                SoTinChi INTEGER NOT NULL,
+                LoaiMon TEXT,
+                MaNganh TEXT
+            )'
+        );
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS GiangVien (
+                MaGV TEXT PRIMARY KEY,
+                HoTen TEXT NOT NULL,
+                GioiTinh TEXT,
+                NgaySinh TEXT,
+                Email TEXT UNIQUE NOT NULL,
+                SoDienThoai TEXT,
+                HocHamHocVi TEXT,
+                TrangThai TEXT
+            )'
+        );
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS LopHocPhan (
+                MaLHP TEXT PRIMARY KEY,
+                MaMon TEXT,
+                MaGV TEXT,
+                HocKy INTEGER,
+                NamHoc TEXT,
+                SoLuongToiDa INTEGER
+            )'
+        );
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS ThoiKhoaBieu (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                MaLHP TEXT,
+                Thu INTEGER,
+                CaHoc TEXT,
+                PhongHoc TEXT
+            )'
+        );
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS KetQuaHocTap (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                MaSV TEXT,
+                MaLHP TEXT,
+                DiemChuyenCan REAL,
+                DiemGiuaKy REAL,
+                DiemCuoiKy REAL,
+                UNIQUE(MaSV, MaLHP)
+            )'
+        );
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS SinhVien (
+                MaSV TEXT PRIMARY KEY,
+                HoTen TEXT NOT NULL,
+                NgaySinh TEXT,
+                GioiTinh TEXT,
+                CCCD TEXT UNIQUE,
+                DiaChi TEXT,
+                SoDienThoai TEXT,
+                Email TEXT UNIQUE,
+                MaLop TEXT,
+                NgayNhapHoc TEXT,
+                TrangThai TEXT
+            )'
+        );
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS LopHocPhanMap (
+                LegacyId INTEGER PRIMARY KEY AUTOINCREMENT,
+                MaLHP TEXT NOT NULL UNIQUE
+            )'
+        );
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_lhpmap_ma ON LopHocPhanMap(MaLHP)');
 
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS courses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                course_code TEXT NOT NULL UNIQUE,
-                course_name TEXT NOT NULL,
-                credits INTEGER,
-                teacher_code TEXT NOT NULL,
-                department TEXT,
-                schedule TEXT,
-                classroom TEXT,
-                max_students INTEGER,
-                weight_cc REAL DEFAULT 0,
-                weight_gk REAL DEFAULT 0,
-                weight_ck REAL DEFAULT 0,
-                department_id INTEGER,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )'
-        );
+        // Chuyen CaHoc tu INTEGER sang TEXT (luu dang "start-end")
+        $tkbCols = $pdo->query('PRAGMA table_info(ThoiKhoaBieu)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $caHocType = '';
+        foreach ($tkbCols as $col) {
+            if (strcasecmp((string)($col['name'] ?? ''), 'CaHoc') === 0) {
+                $caHocType = strtoupper(trim((string)($col['type'] ?? '')));
+                break;
+            }
+        }
+        if ($caHocType !== '' && strpos($caHocType, 'TEXT') === false && strpos($caHocType, 'CHAR') === false && strpos($caHocType, 'VARCHAR') === false) {
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS ThoiKhoaBieu_new (
+                    Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    MaLHP TEXT,
+                    Thu INTEGER,
+                    CaHoc TEXT,
+                    PhongHoc TEXT
+                )'
+            );
+            $pdo->exec(
+                "INSERT INTO ThoiKhoaBieu_new (Id, MaLHP, Thu, CaHoc, PhongHoc)
+                 SELECT Id, MaLHP, Thu,
+                        CASE
+                          WHEN CaHoc IS NULL OR trim(CaHoc) = '' THEN ''
+                          WHEN trim(CaHoc) GLOB '[0-9]*' THEN trim(CaHoc) || '-' || trim(CaHoc)
+                          ELSE trim(CaHoc)
+                        END,
+                        PhongHoc
+                 FROM ThoiKhoaBieu"
+            );
+            $pdo->exec('DROP TABLE ThoiKhoaBieu');
+            $pdo->exec('ALTER TABLE ThoiKhoaBieu_new RENAME TO ThoiKhoaBieu');
+        }
 
-        // Legacy tables are kept for backward compatibility.
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS course_enrollments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                course_id INTEGER NOT NULL,
-                student_code TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(course_id, student_code),
-                FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
-            )'
-        );
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS course_scores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                course_id INTEGER NOT NULL,
-                student_code TEXT NOT NULL,
-                cc REAL,
-                gk REAL,
-                ck REAL,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(course_id, student_code),
-                FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
-            )'
-        );
+        $columns = $pdo->query('PRAGMA table_info(LopHocPhan)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $names = [];
+        foreach ($columns as $c) $names[(string)$c['name']] = true;
+        if (!isset($names['TrongSoCC'])) $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoCC REAL DEFAULT 0');
+        if (!isset($names['TrongSoGK'])) $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoGK REAL DEFAULT 0');
+        if (!isset($names['TrongSoCK'])) $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoCK REAL DEFAULT 0');
+        if (!isset($names['CreatedAt'])) {
+            // SQLite khong cho ADD COLUMN voi default khong hang so (CURRENT_TIMESTAMP)
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN CreatedAt TEXT');
+            $pdo->exec("UPDATE LopHocPhan SET CreatedAt = datetime('now', 'localtime') WHERE CreatedAt IS NULL OR trim(CreatedAt) = ''");
+        }
 
-        // Normalized tables
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS course_sections (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                section_code TEXT NOT NULL UNIQUE,
-                course_id INTEGER NOT NULL,
-                teacher_id INTEGER,
-                classroom_id INTEGER,
-                schedule TEXT,
-                semester INTEGER,
-                academic_year INTEGER,
-                max_students INTEGER,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(course_id) REFERENCES courses(id) ON DELETE CASCADE
-            )'
-        );
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS enrollments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER NOT NULL,
-                course_section_id INTEGER NOT NULL,
-                enrolled_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(student_id, course_section_id),
-                FOREIGN KEY(course_section_id) REFERENCES course_sections(id) ON DELETE CASCADE
-            )'
-        );
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS scores (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_id INTEGER NOT NULL,
-                course_section_id INTEGER NOT NULL,
-                cc REAL,
-                gk REAL,
-                ck REAL,
-                updated_at TEXT,
-                UNIQUE(student_id, course_section_id),
-                FOREIGN KEY(course_section_id) REFERENCES course_sections(id) ON DELETE CASCADE
-            )'
-        );
-
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_courses_code ON courses(course_code)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_courses_teacher ON courses(teacher_code)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_courses_department ON courses(department)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_course_sections_course_id ON course_sections(course_id)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_enrollments_course_section_id ON enrollments(course_section_id)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_enrollments_student_id ON enrollments(student_id)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scores_course_section_id ON scores(course_section_id)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_scores_student_id ON scores(student_id)');
+        $rows = $pdo->query('SELECT MaLHP FROM LopHocPhan')->fetchAll(PDO::FETCH_COLUMN) ?: [];
+        foreach ($rows as $maLHP) {
+            self::ensureMapForLhp($pdo, (string)$maLHP);
+        }
     }
 
     public static function insertWithPdo(PDO $pdo, array $data): int
     {
-        $departmentId = self::resolveDepartmentId($pdo, (string)($data['department'] ?? ''));
-        $stmt = $pdo->prepare(
-            'INSERT INTO courses (
-                course_code, course_name, credits, teacher_code, department, department_id, schedule, classroom, max_students
-            ) VALUES (
-                :course_code, :course_name, :credits, :teacher_code, :department, :department_id, :schedule, :classroom, :max_students
-            )'
-        );
+        self::ensureSchema($pdo);
+        $maMon = trim((string)$data['course_code']);
+        $maLHP = $maMon . '-01';
+        $i = 1;
+        while (true) {
+            $stmt = $pdo->prepare('SELECT 1 FROM LopHocPhan WHERE MaLHP = :ma LIMIT 1');
+            $stmt->execute([':ma' => $maLHP]);
+            if (!$stmt->fetchColumn()) break;
+            $i++;
+            $maLHP = $maMon . '-' . str_pad((string)$i, 2, '0', STR_PAD_LEFT);
+        }
 
+        $maNganh = self::resolveNganh($pdo, (string)($data['department'] ?? ''));
+        $stmt = $pdo->prepare(
+            'INSERT INTO MonHoc (MaMon, TenMon, SoTinChi, LoaiMon, MaNganh)
+             VALUES (:ma_mon,:ten_mon,:so_tin_chi,"BAT_BUOC",:ma_nganh)
+             ON CONFLICT(MaMon) DO UPDATE SET
+                TenMon = excluded.TenMon,
+                SoTinChi = excluded.SoTinChi,
+                MaNganh = COALESCE(excluded.MaNganh, MonHoc.MaNganh)'
+        );
         $stmt->execute([
-            ':course_code' => $data['course_code'],
-            ':course_name' => $data['course_name'],
-            ':credits' => $data['credits'],
-            ':teacher_code' => $data['teacher_code'],
-            ':department' => $data['department'] ?: null,
-            ':department_id' => $departmentId,
-            ':schedule' => $data['schedule'] ?: null,
-            ':classroom' => $data['classroom'] ?: null,
-            ':max_students' => $data['max_students'],
+            ':ma_mon' => $maMon,
+            ':ten_mon' => $data['course_name'],
+            ':so_tin_chi' => (int)($data['credits'] ?? 0),
+            ':ma_nganh' => $maNganh,
         ]);
 
-        $courseId = (int)$pdo->lastInsertId();
-        self::upsertDefaultSectionWithPdo($pdo, $courseId);
-        return $courseId;
+        $stmt = $pdo->prepare(
+            'INSERT INTO LopHocPhan (
+                MaLHP, MaMon, MaGV, HocKy, NamHoc, SoLuongToiDa, TrongSoCC, TrongSoGK, TrongSoCK, CreatedAt
+            ) VALUES (
+                :ma_lhp, :ma_mon, :ma_gv, NULL, NULL, :max, 0, 0, 0, CURRENT_TIMESTAMP
+            )'
+        );
+        $stmt->execute([
+            ':ma_lhp' => $maLHP,
+            ':ma_mon' => $maMon,
+            ':ma_gv' => $data['teacher_code'] ?: null,
+            ':max' => $data['max_students'] !== null ? (int)$data['max_students'] : null,
+        ]);
+
+        $schedules = self::splitValues((string)($data['schedule'] ?? ''));
+        $rooms = self::splitValues((string)($data['classroom'] ?? ''));
+        $insTkb = $pdo->prepare('INSERT INTO ThoiKhoaBieu (MaLHP, Thu, CaHoc, PhongHoc) VALUES (:ma_lhp,:thu,:ca,:phong)');
+        foreach ($schedules as $idx => $raw) {
+            $slot = self::parseScheduleItem($raw);
+            if (!$slot) continue;
+            $room = $rooms[$idx] ?? ($rooms[0] ?? null);
+            $insTkb->execute([
+                ':ma_lhp' => $maLHP,
+                ':thu' => $slot['thu'],
+                ':ca' => $slot['ca'],
+                ':phong' => $room,
+            ]);
+        }
+
+        return self::ensureMapForLhp($pdo, $maLHP);
     }
 
     public static function updateByIdWithPdo(PDO $pdo, int $courseId, array $data): bool
     {
-        $departmentId = self::resolveDepartmentId($pdo, (string)($data['department'] ?? ''));
-        $stmt = $pdo->prepare(
-            'UPDATE courses
-             SET course_code = :course_code,
-                 course_name = :course_name,
-                 credits = :credits,
-                 teacher_code = :teacher_code,
-                 department = :department,
-                 department_id = :department_id,
-                 schedule = :schedule,
-                 classroom = :classroom,
-                 max_students = :max_students
-             WHERE id = :id'
-        );
+        self::ensureSchema($pdo);
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return false;
 
-        $ok = $stmt->execute([
-            ':id' => $courseId,
-            ':course_code' => $data['course_code'],
-            ':course_name' => $data['course_name'],
-            ':credits' => $data['credits'],
-            ':teacher_code' => $data['teacher_code'],
-            ':department' => $data['department'] ?: null,
-            ':department_id' => $departmentId,
-            ':schedule' => $data['schedule'] ?: null,
-            ':classroom' => $data['classroom'] ?: null,
-            ':max_students' => $data['max_students'],
+        $stmt = $pdo->prepare('SELECT MaMon FROM LopHocPhan WHERE MaLHP = :ma_lhp LIMIT 1');
+        $stmt->execute([':ma_lhp' => $maLHP]);
+        $oldMaMon = (string)$stmt->fetchColumn();
+        $newMaMon = trim((string)$data['course_code']);
+
+        $maNganh = self::resolveNganh($pdo, (string)($data['department'] ?? ''));
+        $stmt = $pdo->prepare(
+            'INSERT INTO MonHoc (MaMon, TenMon, SoTinChi, LoaiMon, MaNganh)
+             VALUES (:ma_mon,:ten_mon,:so_tin_chi,"BAT_BUOC",:ma_nganh)
+             ON CONFLICT(MaMon) DO UPDATE SET
+                TenMon = excluded.TenMon,
+                SoTinChi = excluded.SoTinChi,
+                MaNganh = COALESCE(excluded.MaNganh, MonHoc.MaNganh)'
+        );
+        $stmt->execute([
+            ':ma_mon' => $newMaMon,
+            ':ten_mon' => $data['course_name'],
+            ':so_tin_chi' => (int)($data['credits'] ?? 0),
+            ':ma_nganh' => $maNganh,
         ]);
-        self::upsertDefaultSectionWithPdo($pdo, $courseId);
-        return $ok;
+
+        $stmt = $pdo->prepare(
+            'UPDATE LopHocPhan
+             SET MaMon = :ma_mon,
+                 MaGV = :ma_gv,
+                 SoLuongToiDa = :max
+             WHERE MaLHP = :ma_lhp'
+        );
+        $stmt->execute([
+            ':ma_mon' => $newMaMon,
+            ':ma_gv' => $data['teacher_code'] ?: null,
+            ':max' => $data['max_students'] !== null ? (int)$data['max_students'] : null,
+            ':ma_lhp' => $maLHP,
+        ]);
+
+        $pdo->prepare('DELETE FROM ThoiKhoaBieu WHERE MaLHP = :ma_lhp')->execute([':ma_lhp' => $maLHP]);
+        $schedules = self::splitValues((string)($data['schedule'] ?? ''));
+        $rooms = self::splitValues((string)($data['classroom'] ?? ''));
+        $insTkb = $pdo->prepare('INSERT INTO ThoiKhoaBieu (MaLHP, Thu, CaHoc, PhongHoc) VALUES (:ma_lhp,:thu,:ca,:phong)');
+        foreach ($schedules as $idx => $raw) {
+            $slot = self::parseScheduleItem($raw);
+            if (!$slot) continue;
+            $room = $rooms[$idx] ?? ($rooms[0] ?? null);
+            $insTkb->execute([
+                ':ma_lhp' => $maLHP,
+                ':thu' => $slot['thu'],
+                ':ca' => $slot['ca'],
+                ':phong' => $room,
+            ]);
+        }
+
+        if ($oldMaMon !== '' && $oldMaMon !== $newMaMon) {
+            $stmt = $pdo->prepare('SELECT COUNT(1) FROM LopHocPhan WHERE MaMon = :ma_mon');
+            $stmt->execute([':ma_mon' => $oldMaMon]);
+            if ((int)$stmt->fetchColumn() === 0) {
+                $pdo->prepare('DELETE FROM MonHoc WHERE MaMon = :ma_mon')->execute([':ma_mon' => $oldMaMon]);
+            }
+        }
+        return true;
     }
 
     public static function deleteByIdWithPdo(PDO $pdo, int $courseId): void
     {
-        $sectionId = self::getSectionIdByCourseIdWithPdo($pdo, $courseId);
-        if ($sectionId !== null) {
-            $pdo->prepare('DELETE FROM scores WHERE course_section_id = :id')->execute([':id' => $sectionId]);
-            $pdo->prepare('DELETE FROM enrollments WHERE course_section_id = :id')->execute([':id' => $sectionId]);
-            $pdo->prepare('DELETE FROM course_sections WHERE id = :id')->execute([':id' => $sectionId]);
-        }
+        self::ensureSchema($pdo);
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return;
+        $stmt = $pdo->prepare('SELECT MaMon FROM LopHocPhan WHERE MaLHP = :ma_lhp LIMIT 1');
+        $stmt->execute([':ma_lhp' => $maLHP]);
+        $maMon = (string)$stmt->fetchColumn();
 
-        // Keep deleting legacy tables for compatibility.
-        $pdo->prepare('DELETE FROM course_scores WHERE course_id = :course_id')->execute([':course_id' => $courseId]);
-        $pdo->prepare('DELETE FROM course_enrollments WHERE course_id = :course_id')->execute([':course_id' => $courseId]);
-        $pdo->prepare('DELETE FROM courses WHERE id = :course_id')->execute([':course_id' => $courseId]);
+        $pdo->prepare('DELETE FROM KetQuaHocTap WHERE MaLHP = :ma_lhp')->execute([':ma_lhp' => $maLHP]);
+        $pdo->prepare('DELETE FROM ThoiKhoaBieu WHERE MaLHP = :ma_lhp')->execute([':ma_lhp' => $maLHP]);
+        $pdo->prepare('DELETE FROM LopHocPhan WHERE MaLHP = :ma_lhp')->execute([':ma_lhp' => $maLHP]);
+        $pdo->prepare('DELETE FROM LopHocPhanMap WHERE MaLHP = :ma_lhp')->execute([':ma_lhp' => $maLHP]);
+
+        if ($maMon !== '') {
+            $stmt = $pdo->prepare('SELECT COUNT(1) FROM LopHocPhan WHERE MaMon = :ma_mon');
+            $stmt->execute([':ma_mon' => $maMon]);
+            if ((int)$stmt->fetchColumn() === 0) {
+                $pdo->prepare('DELETE FROM MonHoc WHERE MaMon = :ma_mon')->execute([':ma_mon' => $maMon]);
+            }
+        }
     }
 
     public static function replaceEnrollmentsWithPdo(PDO $pdo, int $courseId, array $studentCodes): void
     {
-        $sectionId = self::upsertDefaultSectionWithPdo($pdo, $courseId);
-        if ($sectionId <= 0) {
-            return;
-        }
-
-        $pdo->prepare('DELETE FROM enrollments WHERE course_section_id = :section_id')->execute([':section_id' => $sectionId]);
-        $pdo->prepare('DELETE FROM course_enrollments WHERE course_id = :course_id')->execute([':course_id' => $courseId]);
-
-        if (empty($studentCodes)) {
-            return;
-        }
-
+        self::ensureSchema($pdo);
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return;
+        $pdo->prepare('DELETE FROM KetQuaHocTap WHERE MaLHP = :ma_lhp')->execute([':ma_lhp' => $maLHP]);
+        if (empty($studentCodes)) return;
         self::appendEnrollmentsWithPdo($pdo, $courseId, $studentCodes);
     }
 
     public static function appendEnrollmentsWithPdo(PDO $pdo, int $courseId, array $studentCodes): int
     {
-        $sectionId = self::upsertDefaultSectionWithPdo($pdo, $courseId);
-        if ($sectionId <= 0) {
-            return 0;
-        }
-
-        $insNew = $pdo->prepare('INSERT OR IGNORE INTO enrollments (student_id, course_section_id, enrolled_at) VALUES (:student_id, :course_section_id, CURRENT_TIMESTAMP)');
-        $insOld = $pdo->prepare('INSERT OR IGNORE INTO course_enrollments (course_id, student_code, created_at) VALUES (:course_id, :student_code, CURRENT_TIMESTAMP)');
-
+        self::ensureSchema($pdo);
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return 0;
+        $ins = $pdo->prepare(
+            'INSERT INTO KetQuaHocTap (MaSV, MaLHP, DiemChuyenCan, DiemGiuaKy, DiemCuoiKy)
+             VALUES (:ma_sv, :ma_lhp, NULL, NULL, NULL)
+             ON CONFLICT(MaSV, MaLHP) DO NOTHING'
+        );
         $added = 0;
-        foreach ($studentCodes as $studentCode) {
-            $code = trim((string)$studentCode);
-            if ($code === '') {
-                continue;
-            }
-            $studentId = self::resolveStudentIdByCode($pdo, $code);
-            if ($studentId === null) {
-                continue;
-            }
-
-            $insNew->execute([
-                ':student_id' => $studentId,
-                ':course_section_id' => $sectionId,
-            ]);
-            if ($insNew->rowCount() > 0) {
-                $added++;
-            }
-
-            // legacy mirror
-            $insOld->execute([
-                ':course_id' => $courseId,
-                ':student_code' => $code,
-            ]);
+        foreach ($studentCodes as $code) {
+            $code = trim((string)$code);
+            if ($code === '') continue;
+            $ins->execute([':ma_sv' => $code, ':ma_lhp' => $maLHP]);
+            if ($ins->rowCount() > 0) $added++;
         }
         return $added;
     }
@@ -374,56 +424,62 @@ class Course
     public static function findValidStudentCodes(PDO $pdo, array $studentCodes): array
     {
         $studentCodes = array_values(array_unique(array_filter(array_map('trim', $studentCodes))));
-        if (empty($studentCodes)) {
-            return [];
-        }
-
+        if (empty($studentCodes)) return [];
         $placeholders = implode(',', array_fill(0, count($studentCodes), '?'));
-        $stmt = $pdo->prepare("SELECT student_code FROM students WHERE student_code IN ($placeholders)");
+        $stmt = $pdo->prepare("SELECT MaSV FROM SinhVien WHERE MaSV IN ($placeholders)");
         $stmt->execute($studentCodes);
-        $rows = $stmt->fetchAll();
-        return array_values(array_map(static fn ($row) => (string)$row['student_code'], $rows));
+        return array_map(static fn($r) => (string)$r['MaSV'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
     public static function findById(int $id)
     {
         self::ensureSchema();
         $pdo = get_db_connection();
+        $maLHP = self::getMaLhpByLegacyId($pdo, $id);
+        if (!$maLHP) return false;
         $stmt = $pdo->prepare(
-            'SELECT c.id, c.course_code, c.course_name, c.credits, c.teacher_code, c.department, c.schedule, c.classroom, c.max_students,
-                    c.weight_cc, c.weight_gk, c.weight_ck, c.created_at,
-                    t.full_name AS teacher_name,
-                    (
-                      SELECT COUNT(1)
-                      FROM enrollments e
-                      INNER JOIN course_sections cs ON cs.id = e.course_section_id
-                      WHERE cs.course_id = c.id
-                    ) AS enrolled_count
-             FROM courses c
-             LEFT JOIN teachers t ON t.teacher_code = c.teacher_code
-             WHERE c.id = :id
+            'SELECT l.MaLHP, l.MaMon, l.MaGV, l.SoLuongToiDa, l.TrongSoCC, l.TrongSoGK, l.TrongSoCK, l.CreatedAt,
+                    m.TenMon, m.SoTinChi, n.TenNganh, g.HoTen AS teacher_name
+             FROM LopHocPhan l
+             LEFT JOIN MonHoc m ON m.MaMon = l.MaMon
+             LEFT JOIN Nganh n ON n.MaNganh = m.MaNganh
+             LEFT JOIN GiangVien g ON g.MaGV = l.MaGV
+             WHERE l.MaLHP = :ma_lhp
              LIMIT 1'
         );
-        $stmt->execute([':id' => $id]);
-        return $stmt->fetch();
+        $stmt->execute([':ma_lhp' => $maLHP]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) return false;
+        $scheduleInfo = self::buildScheduleClassroom($pdo, $maLHP);
+        $countStmt = $pdo->prepare('SELECT COUNT(1) FROM KetQuaHocTap WHERE MaLHP = :ma_lhp');
+        $countStmt->execute([':ma_lhp' => $maLHP]);
+        return [
+            'id' => $id,
+            'course_code' => $row['MaMon'] ?? '',
+            'course_name' => $row['TenMon'] ?? '',
+            'credits' => $row['SoTinChi'] !== null ? (int)$row['SoTinChi'] : null,
+            'teacher_code' => $row['MaGV'] ?? '',
+            'department' => $row['TenNganh'] ?? '',
+            'schedule' => $scheduleInfo['schedule'],
+            'classroom' => $scheduleInfo['classroom'],
+            'max_students' => $row['SoLuongToiDa'] !== null ? (int)$row['SoLuongToiDa'] : null,
+            'weight_cc' => (float)($row['TrongSoCC'] ?? 0),
+            'weight_gk' => (float)($row['TrongSoGK'] ?? 0),
+            'weight_ck' => (float)($row['TrongSoCK'] ?? 0),
+            'created_at' => $row['CreatedAt'] ?? '',
+            'teacher_name' => $row['teacher_name'] ?? '',
+            'enrolled_count' => (int)$countStmt->fetchColumn(),
+        ];
     }
 
     public static function isStudentEnrolled(int $courseId, string $studentCode): bool
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $stmt = $pdo->prepare(
-            'SELECT 1
-             FROM enrollments e
-             INNER JOIN course_sections cs ON cs.id = e.course_section_id
-             INNER JOIN students s ON s.id = e.student_id
-             WHERE cs.course_id = :course_id AND lower(s.student_code) = lower(:student_code)
-             LIMIT 1'
-        );
-        $stmt->execute([
-            ':course_id' => $courseId,
-            ':student_code' => $studentCode,
-        ]);
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return false;
+        $stmt = $pdo->prepare('SELECT 1 FROM KetQuaHocTap WHERE lower(MaSV)=lower(:ma_sv) AND MaLHP = :ma_lhp LIMIT 1');
+        $stmt->execute([':ma_sv' => $studentCode, ':ma_lhp' => $maLHP]);
         return (bool)$stmt->fetchColumn();
     }
 
@@ -431,37 +487,36 @@ class Course
     {
         self::ensureSchema();
         $pdo = get_db_connection();
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return [];
         $stmt = $pdo->prepare(
-            'SELECT DISTINCT s.student_code, s.full_name, s.class_name, s.faculty, s.email, s.phone
-             FROM enrollments e
-             INNER JOIN course_sections cs ON cs.id = e.course_section_id
-             INNER JOIN students s ON s.id = e.student_id
-             WHERE cs.course_id = :course_id
-             ORDER BY s.student_code ASC'
+            'SELECT s.MaSV AS student_code, s.HoTen AS full_name, s.MaLop AS class_name, n.TenNganh AS faculty, s.Email AS email, s.SoDienThoai AS phone
+             FROM KetQuaHocTap k
+             INNER JOIN SinhVien s ON s.MaSV = k.MaSV
+             LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
+             LEFT JOIN Nganh n ON n.MaNganh = l.MaNganh
+             WHERE k.MaLHP = :ma_lhp
+             ORDER BY s.MaSV ASC'
         );
-        $stmt->execute([':course_id' => $courseId]);
-        return $stmt->fetchAll() ?: [];
+        $stmt->execute([':ma_lhp' => $maLHP]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
     public static function getScoresByCourseId(int $courseId): array
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $stmt = $pdo->prepare(
-            'SELECT s.student_code, sc.cc, sc.gk, sc.ck
-             FROM scores sc
-             INNER JOIN course_sections cs ON cs.id = sc.course_section_id
-             INNER JOIN students s ON s.id = sc.student_id
-             WHERE cs.course_id = :course_id'
-        );
-        $stmt->execute([':course_id' => $courseId]);
-        $rows = $stmt->fetchAll() ?: [];
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return [];
+        $stmt = $pdo->prepare('SELECT MaSV, DiemChuyenCan, DiemGiuaKy, DiemCuoiKy FROM KetQuaHocTap WHERE MaLHP = :ma_lhp');
+        $stmt->execute([':ma_lhp' => $maLHP]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $map = [];
-        foreach ($rows as $row) {
-            $map[(string)$row['student_code']] = [
-                'cc' => $row['cc'] !== null ? (float)$row['cc'] : null,
-                'gk' => $row['gk'] !== null ? (float)$row['gk'] : null,
-                'ck' => $row['ck'] !== null ? (float)$row['ck'] : null,
+        foreach ($rows as $r) {
+            $map[(string)$r['MaSV']] = [
+                'cc' => $r['DiemChuyenCan'] !== null ? (float)$r['DiemChuyenCan'] : null,
+                'gk' => $r['DiemGiuaKy'] !== null ? (float)$r['DiemGiuaKy'] : null,
+                'ck' => $r['DiemCuoiKy'] !== null ? (float)$r['DiemCuoiKy'] : null,
             ];
         }
         return $map;
@@ -469,62 +524,36 @@ class Course
 
     public static function updateWeightsWithPdo(PDO $pdo, int $courseId, float $weightCc, float $weightGk, float $weightCk): bool
     {
-        $stmt = $pdo->prepare(
-            'UPDATE courses
-             SET weight_cc = :weight_cc,
-                 weight_gk = :weight_gk,
-                 weight_ck = :weight_ck
-             WHERE id = :id'
-        );
+        self::ensureSchema($pdo);
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return false;
+        $stmt = $pdo->prepare('UPDATE LopHocPhan SET TrongSoCC = :cc, TrongSoGK = :gk, TrongSoCK = :ck WHERE MaLHP = :ma_lhp');
         return $stmt->execute([
-            ':id' => $courseId,
-            ':weight_cc' => $weightCc,
-            ':weight_gk' => $weightGk,
-            ':weight_ck' => $weightCk,
+            ':cc' => $weightCc,
+            ':gk' => $weightGk,
+            ':ck' => $weightCk,
+            ':ma_lhp' => $maLHP,
         ]);
     }
 
     public static function upsertScoresWithPdo(PDO $pdo, int $courseId, array $scores): void
     {
-        $sectionId = self::upsertDefaultSectionWithPdo($pdo, $courseId);
-        if ($sectionId <= 0) {
-            return;
-        }
-
-        $stmtNew = $pdo->prepare(
-            'INSERT INTO scores (student_id, course_section_id, cc, gk, ck, updated_at)
-             VALUES (:student_id, :course_section_id, :cc, :gk, :ck, CURRENT_TIMESTAMP)
-             ON CONFLICT(student_id, course_section_id)
-             DO UPDATE SET cc = excluded.cc, gk = excluded.gk, ck = excluded.ck, updated_at = CURRENT_TIMESTAMP'
+        self::ensureSchema($pdo);
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return;
+        $stmt = $pdo->prepare(
+            'INSERT INTO KetQuaHocTap (MaSV, MaLHP, DiemChuyenCan, DiemGiuaKy, DiemCuoiKy)
+             VALUES (:ma_sv, :ma_lhp, :cc, :gk, :ck)
+             ON CONFLICT(MaSV, MaLHP)
+             DO UPDATE SET DiemChuyenCan = excluded.DiemChuyenCan, DiemGiuaKy = excluded.DiemGiuaKy, DiemCuoiKy = excluded.DiemCuoiKy'
         );
-        $stmtOld = $pdo->prepare(
-            'INSERT INTO course_scores (course_id, student_code, cc, gk, ck, updated_at)
-             VALUES (:course_id, :student_code, :cc, :gk, :ck, CURRENT_TIMESTAMP)
-             ON CONFLICT(course_id, student_code)
-             DO UPDATE SET cc = excluded.cc, gk = excluded.gk, ck = excluded.ck, updated_at = CURRENT_TIMESTAMP'
-        );
-
         foreach ($scores as $row) {
-            $studentCode = (string)$row['student_code'];
-            $studentId = self::resolveStudentIdByCode($pdo, $studentCode);
-            if ($studentId === null) {
-                continue;
-            }
-            $params = [
+            $stmt->execute([
+                ':ma_sv' => (string)$row['student_code'],
+                ':ma_lhp' => $maLHP,
                 ':cc' => $row['cc'],
                 ':gk' => $row['gk'],
                 ':ck' => $row['ck'],
-            ];
-            $stmtNew->execute([
-                ':student_id' => $studentId,
-                ':course_section_id' => $sectionId,
-                ...$params,
-            ]);
-            // legacy mirror
-            $stmtOld->execute([
-                ':course_id' => $courseId,
-                ':student_code' => $studentCode,
-                ...$params,
             ]);
         }
     }
@@ -533,91 +562,81 @@ class Course
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-
-        $sql = 'SELECT c.id, c.course_code, c.course_name, c.credits, c.teacher_code, c.department, c.schedule, c.classroom, c.max_students, c.created_at,
-                       t.full_name AS teacher_name,
-                       (
-                         SELECT COUNT(1)
-                         FROM enrollments e
-                         INNER JOIN course_sections cs ON cs.id = e.course_section_id
-                         WHERE cs.course_id = c.id
-                       ) AS enrolled_count
-                FROM courses c
-                LEFT JOIN teachers t ON t.teacher_code = c.teacher_code
-                WHERE 1 = 1';
+        $sql = 'SELECT m.MaMon, m.TenMon, m.SoTinChi, n.TenNganh, l.MaLHP, l.MaGV, l.SoLuongToiDa, l.CreatedAt, g.HoTen AS teacher_name
+                FROM LopHocPhan l
+                INNER JOIN MonHoc m ON m.MaMon = l.MaMon
+                LEFT JOIN Nganh n ON n.MaNganh = m.MaNganh
+                LEFT JOIN GiangVien g ON g.MaGV = l.MaGV
+                WHERE 1=1';
         $params = [];
-
         if (!empty($filters['keyword'])) {
             $sql .= ' AND (
-                lower(c.course_code) LIKE :keyword
-                OR lower(c.course_name) LIKE :keyword
-                OR lower(c.schedule) LIKE :keyword
-                OR lower(c.classroom) LIKE :keyword
-                OR lower(c.teacher_code) LIKE :keyword
-                OR lower(t.full_name) LIKE :keyword
+                lower(m.MaMon) LIKE :keyword
+                OR lower(m.TenMon) LIKE :keyword
+                OR lower(IFNULL(l.MaGV,"")) LIKE :keyword
+                OR lower(IFNULL(g.HoTen,"")) LIKE :keyword
             )';
             $params[':keyword'] = '%' . self::lowerText((string)$filters['keyword']) . '%';
         }
-
         if (!empty($filters['department'])) {
-            $sql .= ' AND lower(c.department) LIKE :department';
+            $sql .= ' AND lower(IFNULL(n.TenNganh,"")) LIKE :department';
             $params[':department'] = '%' . self::lowerText((string)$filters['department']) . '%';
         }
-
         if (!empty($filters['teacher_code'])) {
-            $sql .= ' AND lower(c.teacher_code) LIKE :teacher_code';
+            $sql .= ' AND lower(IFNULL(l.MaGV,"")) LIKE :teacher_code';
             $params[':teacher_code'] = '%' . self::lowerText((string)$filters['teacher_code']) . '%';
         }
-
-        $sql .= ' ORDER BY
-            lower(COALESCE(c.department, "")) ASC,
-            CAST(substr(c.course_code, 4) AS INTEGER) ASC,
-            c.course_code ASC
-            LIMIT 500';
+        $sql .= ' ORDER BY lower(IFNULL(n.TenNganh,"")) ASC, CAST(substr(m.MaMon,4) AS INTEGER) ASC, m.MaMon ASC LIMIT 500';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        return $stmt->fetchAll() ?: [];
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $out = [];
+        foreach ($rows as $row) {
+            $id = self::ensureMapForLhp($pdo, (string)$row['MaLHP']);
+            $sch = self::buildScheduleClassroom($pdo, (string)$row['MaLHP']);
+            $cst = $pdo->prepare('SELECT COUNT(1) FROM KetQuaHocTap WHERE MaLHP = :ma');
+            $cst->execute([':ma' => $row['MaLHP']]);
+            $out[] = [
+                'id' => $id,
+                'course_code' => $row['MaMon'] ?? '',
+                'course_name' => $row['TenMon'] ?? '',
+                'credits' => $row['SoTinChi'] !== null ? (int)$row['SoTinChi'] : null,
+                'teacher_code' => $row['MaGV'] ?? '',
+                'department' => $row['TenNganh'] ?? '',
+                'schedule' => $sch['schedule'],
+                'classroom' => $sch['classroom'],
+                'max_students' => $row['SoLuongToiDa'] !== null ? (int)$row['SoLuongToiDa'] : null,
+                'created_at' => $row['CreatedAt'] ?? '',
+                'teacher_name' => $row['teacher_name'] ?? '',
+                'enrolled_count' => (int)$cst->fetchColumn(),
+            ];
+        }
+        return $out;
     }
 
     public static function listByTeacherCode(string $teacherCode): array
     {
-        self::ensureSchema();
-        $pdo = get_db_connection();
-        $stmt = $pdo->prepare(
-            'SELECT c.id, c.course_code, c.course_name, c.credits, c.teacher_code, c.department, c.schedule, c.classroom, c.max_students, c.created_at,
-                    t.full_name AS teacher_name,
-                    (
-                      SELECT COUNT(1)
-                      FROM enrollments e
-                      INNER JOIN course_sections cs ON cs.id = e.course_section_id
-                      WHERE cs.course_id = c.id
-                    ) AS enrolled_count
-             FROM courses c
-             LEFT JOIN teachers t ON t.teacher_code = c.teacher_code
-             WHERE lower(c.teacher_code) = lower(:teacher_code)
-             ORDER BY c.id DESC'
-        );
-        $stmt->execute([':teacher_code' => $teacherCode]);
-        return $stmt->fetchAll() ?: [];
+        return self::searchForStaff(['teacher_code' => $teacherCode]);
     }
 
     public static function listByStudentCode(string $studentCode): array
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $stmt = $pdo->prepare(
-            'SELECT c.id, c.course_code, c.course_name, c.credits, c.teacher_code, c.department, c.schedule, c.classroom, c.max_students, c.created_at,
-                    t.full_name AS teacher_name
-             FROM enrollments e
-             INNER JOIN students s ON s.id = e.student_id
-             INNER JOIN course_sections cs ON cs.id = e.course_section_id
-             INNER JOIN courses c ON c.id = cs.course_id
-             LEFT JOIN teachers t ON t.teacher_code = c.teacher_code
-             WHERE lower(s.student_code) = lower(:student_code)
-             ORDER BY c.id DESC'
-        );
-        $stmt->execute([':student_code' => $studentCode]);
-        return $stmt->fetchAll() ?: [];
+        $sql = 'SELECT DISTINCT l.MaLHP
+                FROM KetQuaHocTap k
+                INNER JOIN LopHocPhan l ON l.MaLHP = k.MaLHP
+                WHERE lower(k.MaSV) = lower(:ma_sv)';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([':ma_sv' => $studentCode]);
+        $lhps = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
+        $items = [];
+        foreach ($lhps as $maLHP) {
+            $id = self::ensureMapForLhp($pdo, (string)$maLHP);
+            $course = self::findById($id);
+            if ($course) $items[] = $course;
+        }
+        return $items;
     }
 
     public static function listScoresByStudentCode(string $studentCode): array
@@ -625,45 +644,59 @@ class Course
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'SELECT c.id, c.course_code, c.course_name, c.credits, c.teacher_code, c.weight_cc, c.weight_gk, c.weight_ck,
-                    t.full_name AS teacher_name,
-                    sc.cc, sc.gk, sc.ck
-             FROM enrollments e
-             INNER JOIN students s ON s.id = e.student_id
-             INNER JOIN course_sections cs ON cs.id = e.course_section_id
-             INNER JOIN courses c ON c.id = cs.course_id
-             LEFT JOIN teachers t ON t.teacher_code = c.teacher_code
-             LEFT JOIN scores sc ON sc.course_section_id = cs.id AND sc.student_id = s.id
-             WHERE lower(s.student_code) = lower(:student_code)
-             ORDER BY c.course_code ASC'
+            'SELECT k.MaLHP, k.DiemChuyenCan, k.DiemGiuaKy, k.DiemCuoiKy
+             FROM KetQuaHocTap k
+             WHERE lower(k.MaSV) = lower(:ma_sv)'
         );
-        $stmt->execute([':student_code' => $studentCode]);
-        return $stmt->fetchAll() ?: [];
+        $stmt->execute([':ma_sv' => $studentCode]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $out = [];
+        foreach ($rows as $row) {
+            $id = self::ensureMapForLhp($pdo, (string)$row['MaLHP']);
+            $c = self::findById($id);
+            if (!$c) continue;
+            $c['cc'] = $row['DiemChuyenCan'] !== null ? (float)$row['DiemChuyenCan'] : null;
+            $c['gk'] = $row['DiemGiuaKy'] !== null ? (float)$row['DiemGiuaKy'] : null;
+            $c['ck'] = $row['DiemCuoiKy'] !== null ? (float)$row['DiemCuoiKy'] : null;
+            $out[] = $c;
+        }
+        return $out;
     }
 
     public static function getScoreDetailForStudent(int $courseId, string $studentCode)
     {
         self::ensureSchema();
         $pdo = get_db_connection();
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return false;
+        $course = self::findById($courseId);
+        if (!$course) return false;
         $stmt = $pdo->prepare(
-            'SELECT c.id, c.course_code, c.course_name, c.credits, c.teacher_code, c.weight_cc, c.weight_gk, c.weight_ck,
-                    t.full_name AS teacher_name,
-                    s.student_code, s.full_name AS student_name, s.class_name,
-                    sc.cc, sc.gk, sc.ck
-             FROM enrollments e
-             INNER JOIN students s ON s.id = e.student_id
-             INNER JOIN course_sections cs ON cs.id = e.course_section_id
-             INNER JOIN courses c ON c.id = cs.course_id
-             LEFT JOIN teachers t ON t.teacher_code = c.teacher_code
-             LEFT JOIN scores sc ON sc.course_section_id = cs.id AND sc.student_id = s.id
-             WHERE c.id = :course_id AND lower(s.student_code) = lower(:student_code)
+            'SELECT k.DiemChuyenCan, k.DiemGiuaKy, k.DiemCuoiKy, s.MaSV, s.HoTen, s.MaLop
+             FROM KetQuaHocTap k
+             INNER JOIN SinhVien s ON s.MaSV = k.MaSV
+             WHERE k.MaLHP = :ma_lhp AND lower(k.MaSV)=lower(:ma_sv)
              LIMIT 1'
         );
-        $stmt->execute([
-            ':course_id' => $courseId,
-            ':student_code' => $studentCode,
-        ]);
-        return $stmt->fetch();
+        $stmt->execute([':ma_lhp' => $maLHP, ':ma_sv' => $studentCode]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) return false;
+        return [
+            'id' => $courseId,
+            'course_code' => $course['course_code'],
+            'course_name' => $course['course_name'],
+            'teacher_code' => $course['teacher_code'],
+            'teacher_name' => $course['teacher_name'],
+            'credits' => $course['credits'],
+            'weight_cc' => $course['weight_cc'] ?? 0,
+            'weight_gk' => $course['weight_gk'] ?? 0,
+            'weight_ck' => $course['weight_ck'] ?? 0,
+            'student_code' => $row['MaSV'],
+            'student_name' => $row['HoTen'],
+            'class_name' => $row['MaLop'],
+            'cc' => $row['DiemChuyenCan'] !== null ? (float)$row['DiemChuyenCan'] : null,
+            'gk' => $row['DiemGiuaKy'] !== null ? (float)$row['DiemGiuaKy'] : null,
+            'ck' => $row['DiemCuoiKy'] !== null ? (float)$row['DiemCuoiKy'] : null,
+        ];
     }
 }
-

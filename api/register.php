@@ -35,23 +35,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if (empty($errors)) {
-        $stmt = $pdo->prepare('SELECT id FROM admins WHERE lower(login_id) = lower(:login_id) LIMIT 1');
-        $stmt->execute([':login_id' => $login_id]);
-        if ($stmt->fetch()) {
+        if (Admin::findByLoginId($login_id)) {
             $errors['login_id'] = 'Login id da ton tai';
         }
     }
 
     if (empty($errors)) {
-        $stmt = $pdo->prepare(
-            'INSERT INTO admins (login_id, password, account_type, active_flag)
-             VALUES (:login_id, :password, :account_type, 1)'
-        );
-        $stmt->execute([
-            ':login_id' => $login_id,
-            ':password' => $password,
-            ':account_type' => 'staff',
-        ]);
+        Admin::createAccountWithPdo($pdo, $login_id, $password, $login_id, 'staff');
         echo json_encode(['status' => 'success']);
         exit;
     }
