@@ -8,193 +8,262 @@ class Student
         if (function_exists('mb_strtolower')) {
             return mb_strtolower($value, 'UTF-8');
         }
-        $value = str_replace('Đ', 'đ', $value);
         return strtolower($value);
     }
 
     public static function ensureSchema(?PDO $pdo = null): void
     {
-        self::ensureTable($pdo);
-    }
-
-    private static function ensureTable(?PDO $pdo = null): void
-    {
         if (!$pdo) {
             $pdo = get_db_connection();
         }
+
         $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS students (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                student_code TEXT NOT NULL UNIQUE,
-                full_name TEXT NOT NULL,
-                date_of_birth TEXT,
-                gender TEXT,
-                class_name TEXT NOT NULL,
-                faculty TEXT,
-                email TEXT,
-                phone TEXT,
-                avatar TEXT,
-                status TEXT NOT NULL DEFAULT "studying",
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            'CREATE TABLE IF NOT EXISTS SinhVien (
+                MaSV TEXT PRIMARY KEY,
+                HoTen TEXT NOT NULL,
+                NgaySinh TEXT,
+                GioiTinh TEXT,
+                CCCD TEXT UNIQUE,
+                DiaChi TEXT,
+                SoDienThoai TEXT,
+                Email TEXT UNIQUE,
+                MaLop TEXT,
+                NgayNhapHoc TEXT,
+                TrangThai TEXT
             )'
         );
-        $columns = $pdo->query('PRAGMA table_info(students)')->fetchAll();
-        $hasAvatar = false;
-        foreach ($columns as $column) {
-            if (($column['name'] ?? '') === 'avatar') {
-                $hasAvatar = true;
-                break;
-            }
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS LopSinhHoat (
+                MaLop TEXT PRIMARY KEY,
+                TenLop TEXT NOT NULL,
+                MaNganh TEXT,
+                MaGV_CoVan TEXT,
+                NienKhoa TEXT
+            )'
+        );
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS Nganh (
+                MaNganh TEXT PRIMARY KEY,
+                TenNganh TEXT NOT NULL,
+                MoTa TEXT
+            )'
+        );
+
+        $columns = $pdo->query('PRAGMA table_info(SinhVien)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $names = [];
+        foreach ($columns as $c) {
+            $names[(string)$c['name']] = true;
         }
-        if (!$hasAvatar) {
-            $pdo->exec('ALTER TABLE students ADD COLUMN avatar TEXT');
+        if (!isset($names['Avatar'])) {
+            $pdo->exec('ALTER TABLE SinhVien ADD COLUMN Avatar TEXT');
         }
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_students_code ON students(student_code)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_students_name ON students(full_name)');
-        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_students_class ON students(class_name)');
+        if (!isset($names['CreatedAt'])) {
+            // SQLite khong cho ADD COLUMN voi DEFAULT CURRENT_TIMESTAMP
+            $pdo->exec('ALTER TABLE SinhVien ADD COLUMN CreatedAt TEXT');
+            $pdo->exec("UPDATE SinhVien SET CreatedAt = datetime('now', 'localtime') WHERE CreatedAt IS NULL OR trim(CreatedAt) = ''");
+        }
+    }
+
+    private static function resolveNganhIdByName(PDO $pdo, string $faculty): ?string
+    {
+        $name = trim($faculty);
+        if ($name === '') {
+            return null;
+        }
+        $stmt = $pdo->prepare('SELECT MaNganh FROM Nganh WHERE lower(TenNganh)=lower(:name) OR lower(MaNganh)=lower(:name) LIMIT 1');
+        $stmt->execute([':name' => $name]);
+        $id = $stmt->fetchColumn();
+        if ($id !== false) {
+            return (string)$id;
+        }
+        $code = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $name) ?: 'NGANH');
+        if (strlen($code) > 12) {
+            $code = substr($code, 0, 12);
+        }
+        $ins = $pdo->prepare('INSERT OR IGNORE INTO Nganh (MaNganh, TenNganh, MoTa) VALUES (:code, :name, NULL)');
+        $ins->execute([':code' => $code, ':name' => $name]);
+        return $code;
+    }
+
+    private static function ensureLop(PDO $pdo, string $className, string $faculty): void
+    {
+        $maLop = trim($className);
+        if ($maLop === '') {
+            return;
+        }
+        $maNganh = self::resolveNganhIdByName($pdo, $faculty);
+        $stmt = $pdo->prepare(
+            'INSERT INTO LopSinhHoat (MaLop, TenLop, MaNganh, MaGV_CoVan, NienKhoa)
+             VALUES (:ma_lop, :ten_lop, :ma_nganh, NULL, NULL)
+             ON CONFLICT(MaLop) DO UPDATE SET
+                TenLop = excluded.TenLop,
+                MaNganh = COALESCE(excluded.MaNganh, LopSinhHoat.MaNganh)'
+        );
+        $stmt->execute([
+            ':ma_lop' => $maLop,
+            ':ten_lop' => $maLop,
+            ':ma_nganh' => $maNganh,
+        ]);
     }
 
     public static function create(array $data)
     {
-        self::ensureTable();
+        self::ensureSchema();
         $pdo = get_db_connection();
-        $id = self::insertWithPdo($pdo, $data);
-        return self::findById($id);
+        self::insertWithPdo($pdo, $data);
+        return self::findByStudentCode((string)$data['student_code']);
     }
 
     public static function insertWithPdo(PDO $pdo, array $data): int
     {
+        self::ensureSchema($pdo);
+        self::ensureLop($pdo, (string)($data['class_name'] ?? ''), (string)($data['faculty'] ?? ''));
+
         $stmt = $pdo->prepare(
-            'INSERT INTO students (
-                student_code, full_name, date_of_birth, gender, class_name, faculty, email, phone, avatar, status
+            'INSERT INTO SinhVien (
+                MaSV, HoTen, NgaySinh, GioiTinh, DiaChi, SoDienThoai, Email, MaLop, NgayNhapHoc, TrangThai, Avatar, CreatedAt
             ) VALUES (
-                :student_code, :full_name, :date_of_birth, :gender, :class_name, :faculty, :email, :phone, :avatar, :status
+                :ma_sv, :ho_ten, :ngay_sinh, :gioi_tinh, :dia_chi, :so_dien_thoai, :email, :ma_lop, :ngay_nhap_hoc, :trang_thai, :avatar, CURRENT_TIMESTAMP
             )'
         );
-
         $stmt->execute([
-            'student_code' => $data['student_code'],
-            'full_name' => $data['full_name'],
-            'date_of_birth' => $data['date_of_birth'] ?: null,
-            'gender' => $data['gender'] ?: null,
-            'class_name' => $data['class_name'],
-            'faculty' => $data['faculty'] ?: null,
-            'email' => $data['email'] ?: null,
-            'phone' => $data['phone'] ?: null,
-            'avatar' => $data['avatar'] ?: null,
-            'status' => $data['status'] ?: 'studying',
+            ':ma_sv' => $data['student_code'],
+            ':ho_ten' => $data['full_name'],
+            ':ngay_sinh' => $data['date_of_birth'] ?: null,
+            ':gioi_tinh' => $data['gender'] ?: null,
+            ':dia_chi' => null,
+            ':so_dien_thoai' => $data['phone'] ?: null,
+            ':email' => $data['email'] ?: null,
+            ':ma_lop' => $data['class_name'] ?: null,
+            ':ngay_nhap_hoc' => null,
+            ':trang_thai' => $data['status'] ?: 'Đang học',
+            ':avatar' => $data['avatar'] ?: null,
         ]);
 
         return (int)$pdo->lastInsertId();
     }
 
+    private static function mapRow(array $row): array
+    {
+        return [
+            'id' => null,
+            'student_code' => $row['MaSV'] ?? '',
+            'full_name' => $row['HoTen'] ?? '',
+            'date_of_birth' => $row['NgaySinh'] ?? '',
+            'gender' => $row['GioiTinh'] ?? '',
+            'class_name' => $row['MaLop'] ?? '',
+            'faculty' => $row['TenNganh'] ?? '',
+            'email' => $row['Email'] ?? '',
+            'phone' => $row['SoDienThoai'] ?? '',
+            'avatar' => $row['Avatar'] ?? '',
+            'status' => $row['TrangThai'] ?? '',
+            'created_at' => $row['CreatedAt'] ?? '',
+        ];
+    }
+
     public static function findById(int $id)
     {
-        self::ensureTable();
+        self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'SELECT id, student_code, full_name, date_of_birth, gender, class_name, faculty, email, phone, avatar, status, created_at
-             FROM students
-             WHERE id = :id
+            'SELECT s.*, n.TenNganh
+             FROM SinhVien s
+             LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
+             LEFT JOIN Nganh n ON n.MaNganh = l.MaNganh
+             WHERE rowid = :id
              LIMIT 1'
         );
-        $stmt->execute(['id' => $id]);
-        return $stmt->fetch();
+        $stmt->execute([':id' => $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? self::mapRow($row) : false;
     }
 
     public static function search(array $filters = [])
     {
-        self::ensureTable();
+        self::ensureSchema();
         $pdo = get_db_connection();
-
-        $sql = 'SELECT id, student_code, full_name, date_of_birth, gender, class_name, faculty, email, phone, avatar, status, created_at
-                FROM students
-                WHERE 1 = 1';
+        $sql = 'SELECT s.*, n.TenNganh
+                FROM SinhVien s
+                LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
+                LEFT JOIN Nganh n ON n.MaNganh = l.MaNganh
+                WHERE 1=1';
         $params = [];
 
         if (!empty($filters['keyword'])) {
             $sql .= ' AND (
-                lower(student_code) LIKE :keyword
-                OR lower(full_name) LIKE :keyword
-                OR lower(class_name) LIKE :keyword
-                OR lower(faculty) LIKE :keyword
-                OR lower(email) LIKE :keyword
-                OR lower(phone) LIKE :keyword
+                lower(s.MaSV) LIKE :keyword
+                OR lower(s.HoTen) LIKE :keyword
+                OR lower(s.MaLop) LIKE :keyword
+                OR lower(IFNULL(n.TenNganh,"")) LIKE :keyword
+                OR lower(IFNULL(s.Email,"")) LIKE :keyword
+                OR lower(IFNULL(s.SoDienThoai,"")) LIKE :keyword
             )';
-            $params['keyword'] = '%' . self::lowerText((string)$filters['keyword']) . '%';
+            $params[':keyword'] = '%' . self::lowerText((string)$filters['keyword']) . '%';
         }
-
         if (!empty($filters['class_name'])) {
-            $sql .= ' AND lower(class_name) LIKE :class_name';
-            $params['class_name'] = '%' . self::lowerText((string)$filters['class_name']) . '%';
+            $sql .= ' AND lower(IFNULL(s.MaLop,"")) LIKE :class_name';
+            $params[':class_name'] = '%' . self::lowerText((string)$filters['class_name']) . '%';
         }
-
         if (!empty($filters['faculty'])) {
-            $sql .= ' AND lower(faculty) LIKE :faculty';
-            $params['faculty'] = '%' . self::lowerText((string)$filters['faculty']) . '%';
+            $sql .= ' AND lower(IFNULL(n.TenNganh,"")) LIKE :faculty';
+            $params[':faculty'] = '%' . self::lowerText((string)$filters['faculty']) . '%';
         }
-
         if (!empty($filters['status'])) {
-            $sql .= ' AND status = :status';
-            $params['status'] = $filters['status'];
+            $sql .= ' AND s.TrangThai = :status';
+            $params[':status'] = $filters['status'];
         }
-
-        $sql .= ' ORDER BY
-            lower(COALESCE(faculty, "")) ASC,
-            CASE
-                WHEN upper(class_name) GLOB "K[0-9][0-9]*" THEN CAST(substr(class_name, 2, 2) AS INTEGER)
-                ELSE 999
-            END ASC,
-            upper(trim(substr(class_name, 4))) ASC,
-            student_code ASC
-            LIMIT 300';
+        $sql .= ' ORDER BY lower(IFNULL(n.TenNganh,"")) ASC, s.MaLop ASC, s.MaSV ASC LIMIT 300';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
-        return $stmt->fetchAll();
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        return array_map([self::class, 'mapRow'], $rows);
     }
 
     public static function findByStudentCode(string $studentCode)
     {
-        self::ensureTable();
+        self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'SELECT id, student_code, full_name, date_of_birth, gender, class_name, faculty, email, phone, avatar, status, created_at
-             FROM students
-             WHERE student_code = :student_code
+            'SELECT s.*, n.TenNganh
+             FROM SinhVien s
+             LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
+             LEFT JOIN Nganh n ON n.MaNganh = l.MaNganh
+             WHERE lower(s.MaSV) = lower(:code)
              LIMIT 1'
         );
-        $stmt->execute(['student_code' => $studentCode]);
-        return $stmt->fetch();
+        $stmt->execute([':code' => $studentCode]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ? self::mapRow($row) : false;
     }
 
     public static function updateProfileByStudentCode(string $studentCode, array $data): bool
     {
-        self::ensureTable();
+        self::ensureSchema();
         $pdo = get_db_connection();
+        self::ensureLop($pdo, (string)($data['class_name'] ?? ''), (string)($data['faculty'] ?? ''));
         $stmt = $pdo->prepare(
-            'UPDATE students
-             SET full_name = :full_name,
-                 date_of_birth = :date_of_birth,
-                 gender = :gender,
-                 class_name = :class_name,
-                 faculty = :faculty,
-                 email = :email,
-                 phone = :phone,
-                 avatar = :avatar,
-                 status = :status
-             WHERE student_code = :student_code'
+            'UPDATE SinhVien
+             SET HoTen = :ho_ten,
+                 NgaySinh = :ngay_sinh,
+                 GioiTinh = :gioi_tinh,
+                 MaLop = :ma_lop,
+                 Email = :email,
+                 SoDienThoai = :so_dien_thoai,
+                 Avatar = :avatar,
+                 TrangThai = :trang_thai
+             WHERE lower(MaSV) = lower(:ma_sv)'
         );
-        return $stmt->execute([
-            'student_code' => $studentCode,
-            'full_name' => $data['full_name'],
-            'date_of_birth' => $data['date_of_birth'] ?: null,
-            'gender' => $data['gender'] ?: null,
-            'class_name' => $data['class_name'],
-            'faculty' => $data['faculty'] ?: null,
-            'email' => $data['email'] ?: null,
-            'phone' => $data['phone'] ?: null,
-            'avatar' => $data['avatar'] ?: null,
-            'status' => $data['status'] ?: 'studying',
+        $stmt->execute([
+            ':ho_ten' => $data['full_name'],
+            ':ngay_sinh' => $data['date_of_birth'] ?: null,
+            ':gioi_tinh' => $data['gender'] ?: null,
+            ':ma_lop' => $data['class_name'] ?: null,
+            ':email' => $data['email'] ?: null,
+            ':so_dien_thoai' => $data['phone'] ?: null,
+            ':avatar' => $data['avatar'] ?: null,
+            ':trang_thai' => $data['status'] ?: 'Đang học',
+            ':ma_sv' => $studentCode,
         ]);
+        return $stmt->rowCount() > 0;
     }
 }

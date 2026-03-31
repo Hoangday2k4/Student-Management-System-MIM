@@ -109,15 +109,12 @@ class CourseController
             return null;
         }
 
-        $sql = 'SELECT id, course_code, schedule, classroom FROM courses';
-        $params = [];
+        $rows = Course::searchForStaff([]);
         if ($excludeCourseId !== null && $excludeCourseId > 0) {
-            $sql .= ' WHERE id <> :id';
-            $params[':id'] = $excludeCourseId;
+            $rows = array_values(array_filter($rows, static function ($row) use ($excludeCourseId) {
+                return (int)($row['id'] ?? 0) !== $excludeCourseId;
+            }));
         }
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll() ?: [];
 
         foreach ($rows as $row) {
             $existingSlots = $this->buildScheduleSlots((string)($row['schedule'] ?? ''), (string)($row['classroom'] ?? ''));
@@ -156,36 +153,29 @@ class CourseController
             return [[], [], 0];
         }
 
-        $placeholders = implode(',', array_fill(0, count($studentCodes), '?'));
-        $sql = "SELECT s.student_code, c.course_code, c.schedule
-                FROM enrollments e
-                INNER JOIN students s ON s.id = e.student_id
-                INNER JOIN course_sections cs ON cs.id = e.course_section_id
-                INNER JOIN courses c ON c.id = cs.course_id
-                WHERE s.student_code IN ($placeholders) AND c.id <> ?";
-        $stmt = $pdo->prepare($sql);
-        $params = $studentCodes;
-        $params[] = $courseId;
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll() ?: [];
-
         $conflictMap = [];
-        foreach ($rows as $row) {
-            $studentCode = trim((string)($row['student_code'] ?? ''));
+        foreach ($studentCodes as $studentCode) {
+            $studentCode = trim((string)$studentCode);
             if ($studentCode === '') continue;
-            $existingSlots = $this->buildScheduleSlots((string)($row['schedule'] ?? ''), '');
-            if (empty($existingSlots)) continue;
+            $courses = Course::listByStudentCode($studentCode);
+            foreach ($courses as $row) {
+                if ((int)($row['id'] ?? 0) === $courseId) {
+                    continue;
+                }
+                $existingSlots = $this->buildScheduleSlots((string)($row['schedule'] ?? ''), '');
+                if (empty($existingSlots)) continue;
 
-            foreach ($targetSlots as $target) {
-                foreach ($existingSlots as $old) {
-                    if ((int)$target['day'] !== (int)$old['day']) continue;
-                    if ($this->intervalsOverlap((int)$target['start'], (int)$target['end'], (int)$old['start'], (int)$old['end'])) {
-                        $conflictMap[$studentCode] = [
-                            'student_code' => $studentCode,
-                            'course_code' => (string)($row['course_code'] ?? ''),
-                            'schedule' => (string)($row['schedule'] ?? ''),
-                        ];
-                        break 2;
+                foreach ($targetSlots as $target) {
+                    foreach ($existingSlots as $old) {
+                        if ((int)$target['day'] !== (int)$old['day']) continue;
+                        if ($this->intervalsOverlap((int)$target['start'], (int)$target['end'], (int)$old['start'], (int)$old['end'])) {
+                            $conflictMap[$studentCode] = [
+                                'student_code' => $studentCode,
+                                'course_code' => (string)($row['course_code'] ?? ''),
+                                'schedule' => (string)($row['schedule'] ?? ''),
+                            ];
+                            break 3;
+                        }
                     }
                 }
             }
@@ -645,7 +635,7 @@ class CourseController
         if ($teacherCode !== '') {
             try {
                 if ($pdo) {
-                    $stmt = $pdo->prepare('SELECT teacher_code, full_name FROM teachers WHERE teacher_code = :teacher_code LIMIT 1');
+                    $stmt = $pdo->prepare('SELECT MaGV AS teacher_code, HoTen AS full_name FROM GiangVien WHERE MaGV = :teacher_code LIMIT 1');
                     $stmt->execute([':teacher_code' => $teacherCode]);
                     $teacher = $stmt->fetch();
                 } else {
@@ -806,7 +796,7 @@ class CourseController
         } catch (PDOException $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
             $msg = (string)$e->getMessage();
-            if (strpos($msg, 'UNIQUE constraint failed: courses.course_code') !== false) {
+            if (strpos($msg, 'UNIQUE constraint failed: MonHoc.MaMon') !== false) {
                 jsonResponse([
                     'status' => 'error',
                     'message' => 'MĂ£ mĂ´n há»c Ä‘Ă£ tá»“n táº¡i.',
@@ -931,7 +921,7 @@ class CourseController
             $inserted = 0;
             $skipped = [];
             $existingCodes = [];
-            $courseCodes = $pdo->query('SELECT course_code FROM courses')->fetchAll(PDO::FETCH_COLUMN);
+            $courseCodes = $pdo->query('SELECT MaMon FROM MonHoc')->fetchAll(PDO::FETCH_COLUMN);
             foreach ($courseCodes as $code) {
                 $existingCodes[strtolower(trim((string)$code))] = true;
             }
@@ -1213,7 +1203,7 @@ class CourseController
         } catch (PDOException $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
             $msg = (string)$e->getMessage();
-            if (strpos($msg, 'UNIQUE constraint failed: courses.course_code') !== false) {
+            if (strpos($msg, 'UNIQUE constraint failed: MonHoc.MaMon') !== false) {
                 jsonResponse([
                     'status' => 'error',
                     'message' => 'MĂ£ mĂ´n há»c Ä‘Ă£ tá»“n táº¡i.',
