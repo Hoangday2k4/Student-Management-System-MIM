@@ -7,29 +7,17 @@ const router = useRouter()
 
 const loading = ref(false)
 const searched = ref(false)
-const courses = ref([])
+const rows = ref([])
 const errorMessage = ref('')
 const successMessage = ref('')
-const deletingCode = ref('')
-const detailVisible = ref(false)
-const detailLoading = ref(false)
-const detailError = ref('')
-const detail = reactive({
-  course_code: '',
-  course_name: '',
-  credits: '',
-  department_name: '',
-  department_code: '',
-  section_count: 0,
-  student_count: 0,
-})
+const deletingId = ref(0)
 
 const filters = reactive({
   keyword: '',
 })
 
 const summary = computed(() => ({
-  total: courses.value.length,
+  total: rows.value.length,
 }))
 
 const searchStateQuery = computed(() => {
@@ -39,74 +27,47 @@ const searchStateQuery = computed(() => {
   return q
 })
 
-function subjectBadge(name, code) {
-  const value = String(name || code || '').trim()
-  if (!value) return 'MH'
-  const parts = value.split(/\s+/).filter(Boolean)
-  if (parts.length >= 2) return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase()
-  return value.slice(0, 2).toUpperCase()
+function sectionBadge(sectionCode, courseCode) {
+  const fromSection = String(sectionCode || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 2)
+  if (fromSection) return fromSection.toUpperCase()
+  const fromCourse = String(courseCode || '').replace(/[^A-Za-z0-9]/g, '').slice(0, 2)
+  if (fromCourse) return fromCourse.toUpperCase()
+  return 'HP'
+}
+
+function formatSemester(row) {
+  const semester = Number(row?.semester || 0)
+  const label = semester === 1 ? 'I' : semester === 2 ? 'II' : semester === 3 ? 'Kỳ hè' : '-'
+  const year = String(row?.academic_year || '').trim()
+  return year ? `${label} (${year})` : label
 }
 
 function goCreate() {
-  router.push({ name: 'course-create' })
+  router.push({ name: 'section-create', query: { ...searchStateQuery.value } })
 }
 
-function closeDetail() {
-  detailVisible.value = false
-  detailError.value = ''
-}
-
-async function viewSubject(course) {
-  const code = String(course?.course_code || '').trim()
-  if (!code) return
-  detail.course_code = String(course?.course_code || '')
-  detail.course_name = String(course?.course_name || '')
-  detail.credits = String(course?.credits ?? '')
-  detail.department_name = String(course?.department_name || '')
-  detail.department_code = String(course?.department_code || '')
-  detail.section_count = Number(course?.section_count || 0)
-  detail.student_count = Number(course?.student_count || 0)
-  detailVisible.value = true
-  detailLoading.value = true
-  detailError.value = ''
-  try {
-    const res = await fetch(`/api/courses?mode=subject&code=${encodeURIComponent(code)}`)
-    const payload = await res.json().catch(() => ({}))
-    if (!res.ok || payload.status !== 'success') {
-      detailError.value = payload.message || 'Không thể tải chi tiết môn học.'
-      return
-    }
-    const item = payload.data || {}
-    detail.course_code = String(item.course_code || detail.course_code)
-    detail.course_name = String(item.course_name || detail.course_name)
-    detail.credits = String(item.credits ?? detail.credits)
-    detail.department_name = String(item.department_name || detail.department_name)
-    detail.department_code = String(item.department_code || detail.department_code)
-    detail.section_count = Number(item.section_count ?? detail.section_count)
-    detail.student_count = Number(item.student_count ?? detail.student_count)
-  } catch (error) {
-    detailError.value = 'Không kết nối được máy chủ.'
-  } finally {
-    detailLoading.value = false
-  }
-}
-
-function editSubject(course) {
-  const code = String(course?.course_code || '').trim()
-  if (!code) return
+function viewItem(row) {
   router.push({
-    name: 'subject-form',
+    name: 'section-detail',
     query: {
-      code,
-      keyword: String(filters.keyword || '').trim(),
-      searched: searched.value ? '1' : '0',
+      id: String(row.id),
+      ...searchStateQuery.value,
+    },
+  })
+}
+
+function editItem(row) {
+  router.push({
+    name: 'section-update',
+    query: {
+      id: String(row.id),
+      ...searchStateQuery.value,
     },
   })
 }
 
 function buildQuery() {
   const params = new URLSearchParams()
-  params.append('mode', 'subject')
   if (filters.keyword.trim()) params.append('keyword', filters.keyword.trim())
   return params.toString()
 }
@@ -121,40 +82,41 @@ async function doSearch() {
     const res = await fetch(`/api/courses?${buildQuery()}`)
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
-      errorMessage.value = data.message || data.error || 'Không thể tải dữ liệu môn học.'
-      courses.value = []
+      errorMessage.value = data.message || data.error || 'Không thể tải dữ liệu lớp học phần.'
+      rows.value = []
       return
     }
-    courses.value = Array.isArray(data) ? data : []
+    rows.value = Array.isArray(data) ? data : []
   } catch (error) {
     errorMessage.value = 'Không kết nối được máy chủ.'
-    courses.value = []
+    rows.value = []
   } finally {
     loading.value = false
   }
 }
 
-async function deleteSubject(course) {
-  const code = String(course?.course_code || '').trim().toUpperCase()
-  if (!code) return
-  if (!window.confirm(`Bạn có chắc muốn xóa môn học ${code}?`)) return
+async function deleteItem(row) {
+  const id = Number(row?.id || 0)
+  const code = String(row?.section_code || '').trim()
+  if (!id) return
+  if (!window.confirm(`Bạn có chắc muốn xóa lớp học phần ${code || id}?`)) return
 
-  deletingCode.value = code
+  deletingId.value = id
   errorMessage.value = ''
   successMessage.value = ''
   try {
-    const res = await fetch(`/api/courses?mode=subject&code=${encodeURIComponent(code)}`, { method: 'DELETE' })
+    const res = await fetch(`/api/courses?id=${id}`, { method: 'DELETE' })
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.status !== 'success') {
-      errorMessage.value = data.message || 'Không thể xóa môn học.'
+      errorMessage.value = data.message || 'Không thể xóa lớp học phần.'
       return
     }
-    successMessage.value = `Đã xóa môn học ${code}.`
+    successMessage.value = `Đã xóa lớp học phần ${code || id}.`
     await doSearch()
   } catch (error) {
     errorMessage.value = 'Không kết nối được máy chủ.'
   } finally {
-    deletingCode.value = ''
+    deletingId.value = 0
   }
 }
 
@@ -170,15 +132,15 @@ onMounted(async () => {
     <div class="card">
       <div class="header-row">
         <div>
-          <h1>Quản lý môn học</h1>
-          <p class="subtitle">Quản lý danh sách môn học.</p>
+          <h1>Quản lý học phần</h1>
+          <p class="subtitle">Quản lý danh sách lớp học phần.</p>
         </div>
-        <button class="btn-add" type="button" @click="goCreate">+ Thêm môn học</button>
+        <button class="btn-add" type="button" @click="goCreate">+ Thêm học phần</button>
       </div>
 
       <div class="stats-grid">
         <article class="stat-card">
-          <div class="stat-label">Tổng số môn học</div>
+          <div class="stat-label">Tổng số học phần</div>
           <div class="stat-value">{{ summary.total }}</div>
         </article>
       </div>
@@ -187,7 +149,7 @@ onMounted(async () => {
         <input
           v-model="filters.keyword"
           type="text"
-          placeholder="Tìm kiếm theo mã môn hoặc tên môn..."
+          placeholder="Tìm theo mã HP, mã môn, tên môn, giảng viên..."
           @keyup.enter="doSearch"
         />
         <button class="btn-primary" type="button" @click="doSearch">Tra cứu</button>
@@ -198,50 +160,51 @@ onMounted(async () => {
 
       <div class="table-wrap">
         <div v-if="loading" class="state">Đang tải dữ liệu...</div>
-        <div v-else-if="courses.length === 0" class="state">Không có môn học phù hợp.</div>
+        <div v-else-if="rows.length === 0" class="state">Không có lớp học phần phù hợp.</div>
         <div v-else class="table-scroll">
           <table class="result-table">
             <thead>
               <tr>
-                <th>Môn học</th>
+                <th>Mã HP</th>
+                <th>Tên môn</th>
                 <th>Số tín chỉ</th>
-                <th>Khoa quản lý</th>
+                <th>Giảng viên</th>
+                <th>Học kỳ</th>
+                <th>Sĩ số</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="course in courses" :key="course.course_code">
+              <tr v-for="item in rows" :key="item.id">
                 <td>
                   <div class="class-info">
-                    <span class="class-badge">{{ subjectBadge(course.course_name, course.course_code) }}</span>
+                    <span class="class-badge">{{ sectionBadge(item.section_code, item.course_code) }}</span>
                     <div>
-                      <div class="class-name">{{ course.course_name || '-' }}</div>
-                      <div class="class-sub">Mã: {{ course.course_code || '-' }}</div>
+                      <div class="class-name">{{ item.section_code || '-' }}</div>
+                      <div class="class-sub">Mã môn: {{ item.course_code || '-' }}</div>
                     </div>
                   </div>
                 </td>
-                <td>{{ course.credits ?? '-' }}</td>
+                <td>{{ item.course_name || '-' }}</td>
+                <td>{{ item.credits ?? '-' }}</td>
                 <td>
-                  <div class="major-chip">{{ course.department_name || course.department_code || '-' }}</div>
+                  <div class="main">{{ item.teacher_name || '-' }}</div>
+                  <div class="class-sub">{{ item.teacher_code || '-' }}</div>
                 </td>
+                <td>{{ formatSemester(item) }}</td>
+                <td>{{ item.enrolled_count ?? 0 }} SV</td>
                 <td class="action-cell">
-                  <button class="icon-btn" type="button" title="Xem" @click="viewSubject(course)">
+                  <button class="icon-btn" type="button" title="Xem" @click="viewItem(item)">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="M12 5c5.5 0 9.5 4.8 10.8 6.7a.6.6 0 0 1 0 .6C21.5 14.2 17.5 19 12 19S2.5 14.2 1.2 12.3a.6.6 0 0 1 0-.6C2.5 9.8 6.5 5 12 5zm0 2c-3.8 0-6.9 3-6.9 5s3.1 5 6.9 5 6.9-3 6.9-5-3.1-5-6.9-5zm0 2.2A2.8 2.8 0 1 1 12 14.8a2.8 2.8 0 0 1 0-5.6z" />
                     </svg>
                   </button>
-                  <button class="icon-btn" type="button" title="Cập nhật" @click="editSubject(course)">
+                  <button class="icon-btn" type="button" title="Cập nhật" @click="editItem(item)">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
                       <path d="m16.9 3.3 3.8 3.8a1.2 1.2 0 0 1 0 1.7L10 19.5l-4.8 1.2a.9.9 0 0 1-1.1-1.1L5.3 15 15.2 5a1.2 1.2 0 0 1 1.7 0zm-9.8 13 .8 2.9 2.9-.8 8.9-8.9-2.9-2.9-9 8.9z" />
                     </svg>
                   </button>
-                  <button
-                    class="icon-btn danger-btn"
-                    type="button"
-                    :disabled="deletingCode === String(course.course_code || '').toUpperCase()"
-                    title="Xóa môn học"
-                    @click="deleteSubject(course)"
-                  >
+                  <button class="icon-btn danger-btn" type="button" :disabled="deletingId === item.id" title="Xóa" @click="deleteItem(item)">
                     <svg viewBox="0 0 16 16" aria-hidden="true">
                       <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5" />
                       <path d="M8 5.5a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5" />
@@ -253,25 +216,6 @@ onMounted(async () => {
               </tr>
             </tbody>
           </table>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="detailVisible" class="modal-backdrop" @click.self="closeDetail">
-      <div class="modal-card">
-        <h2>Chi tiết môn học</h2>
-        <p v-if="detailError" class="error">{{ detailError }}</p>
-        <p v-if="detailLoading" class="state">Đang tải dữ liệu...</p>
-        <div v-else class="detail-grid">
-          <div><b>Mã môn:</b> {{ detail.course_code || '-' }}</div>
-          <div><b>Tên môn:</b> {{ detail.course_name || '-' }}</div>
-          <div><b>Số tín chỉ:</b> {{ detail.credits || '-' }}</div>
-          <div><b>Khoa quản lý:</b> {{ detail.department_name || detail.department_code || '-' }}</div>
-          <div><b>Số lớp học phần:</b> {{ detail.section_count }}</div>
-          <div><b>Số sinh viên:</b> {{ detail.student_count }}</div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn-ghost" type="button" @click="closeDetail">Đóng</button>
         </div>
       </div>
     </div>
@@ -345,15 +289,6 @@ input {
   background: #007336;
   color: #fff;
 }
-.btn-ghost {
-  border: none;
-  border-radius: 10px;
-  padding: 10px 20px;
-  font-weight: 700;
-  cursor: pointer;
-  background: #e9eef6;
-  color: #006131;
-}
 
 .success,.error { margin: 0; padding: 10px 12px; border-radius: 8px; }
 .success { background: #eefaf2; color: #177144; }
@@ -382,18 +317,7 @@ input {
 }
 .class-name { font-weight: 700; font-size: 17px; }
 .class-sub { color: #607086; font-size: 12px; }
-
-.major-chip {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 10px;
-  border-radius: 999px;
-  background: #fdecf2;
-  color: #b43262;
-  border: 1px solid #f1c9d9;
-  font-size: 12px;
-  font-weight: 700;
-}
+.main { font-weight: 700; font-size: 17px; }
 
 .action-cell { white-space: nowrap; }
 .icon-btn {
@@ -417,33 +341,8 @@ input {
 .danger-btn:hover { background: #fdeeee; border-color: #e1aaaa; color: #962020; }
 .danger-btn:disabled { opacity: 0.6; cursor: not-allowed; }
 
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.35);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-card {
-  width: min(860px, 95vw);
-  max-height: 88vh;
-  overflow: auto;
-  background: #fff;
-  border: 1px solid #d7deea;
-  border-radius: 12px;
-  padding: 18px;
-}
-
-.modal-card h2 { margin: 0 0 12px; color: #007336; }
-.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
-.modal-actions { margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end; }
-
 @media (max-width: 1080px) {
   .toolbar { grid-template-columns: 1fr; }
   .header-row { flex-direction: column; align-items: stretch; }
-  .detail-grid { grid-template-columns: 1fr; }
 }
 </style>

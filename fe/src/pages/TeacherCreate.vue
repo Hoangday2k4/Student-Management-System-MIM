@@ -1,7 +1,6 @@
 ﻿<script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { FACULTY_OPTIONS } from '@/constants/options'
 
 const router = useRouter()
 const step = ref('input') // input | confirm | done | bulk-confirm | bulk-done
@@ -10,6 +9,8 @@ const serverMessage = ref('')
 const canCreate = ref(null)
 const accountInfo = ref({ login_id: '', default_password: '' })
 const fileInputRef = ref(null)
+const loadingFaculties = ref(false)
+const facultyOptions = ref([])
 const bulkRows = ref([])
 const bulkSkippedInFile = ref([])
 const bulkResult = ref({ inserted_count: 0, skipped_count: 0, skipped: [] })
@@ -20,10 +21,11 @@ const form = reactive({
   full_name: '',
   date_of_birth: '',
   gender: 'Nam',
-  department: FACULTY_OPTIONS[0],
-  homeroom_class: '',
   email: '',
   phone: '',
+  academic_title: '',
+  department: '',
+  homeroom_class: '',
   status: 'Đang công tác',
 })
 
@@ -44,10 +46,31 @@ onMounted(async () => {
     }
     const role = String(data.account_type || '').toLowerCase()
     canCreate.value = role === 'staff' || ['admin', 'manager'].includes(String(data.login_id || '').toLowerCase())
+    await loadFaculties()
   } catch (error) {
     router.replace('/login')
   }
 })
+
+async function loadFaculties() {
+  loadingFaculties.value = true
+  try {
+    const res = await fetch('/api/faculties')
+    const payload = await res.json().catch(() => ({}))
+    if (res.ok && payload.status === 'success' && Array.isArray(payload.data)) {
+      facultyOptions.value = payload.data
+      if (!form.department && facultyOptions.value.length > 0) {
+        form.department = String(facultyOptions.value[0].code || '')
+      }
+    } else {
+      facultyOptions.value = []
+    }
+  } catch (error) {
+    facultyOptions.value = []
+  } finally {
+    loadingFaculties.value = false
+  }
+}
 
 function resetErrors() {
   errors.teacher_code = ''
@@ -68,7 +91,7 @@ function validate() {
     ok = false
   }
   if (!form.department.trim()) {
-    errors.department = 'Hãy nhập khoa/bộ môn.'
+    errors.department = 'Hãy chọn mã khoa.'
     ok = false
   }
   if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
@@ -187,6 +210,7 @@ async function submitForm() {
         ...form,
         teacher_code: form.teacher_code.trim(),
         full_name: form.full_name.trim(),
+        academic_title: form.academic_title.trim(),
         department: form.department.trim(),
         homeroom_class: form.homeroom_class.trim(),
         email: form.email.trim(),
@@ -239,12 +263,12 @@ async function submitForm() {
       <div v-else-if="!canCreate" class="permission-box">
         <h2>Không đủ quyền</h2>
         <p>Chức năng nhập liệu chỉ dành cho tài khoản Admin/Manager.</p>
-        <button class="btn-ghost" @click="router.push('/')">Trang chủ</button>
+        <button class="btn-ghost" @click="router.push('/teachers/search')">Quay lại</button>
       </div>
 
       <form v-else-if="step === 'input'" @submit.prevent="goConfirm">
         <div class="grid">
-          <label for="teacher_code">MSGV *</label>
+          <label for="teacher_code">Mã giảng viên *</label>
           <div>
             <input id="teacher_code" v-model="form.teacher_code" type="text" maxlength="30" />
             <p v-if="errors.teacher_code" class="error">{{ errors.teacher_code }}</p>
@@ -259,18 +283,13 @@ async function submitForm() {
           <label for="date_of_birth">Ngày sinh</label>
           <input id="date_of_birth" v-model="form.date_of_birth" type="date" />
 
-          <label for="gender">Giới tính</label>
-          <select id="gender" v-model="form.gender">
-            <option value="Nam">Nam</option>
-            <option value="Nữ">Nữ</option>
-          </select>
-
-          <label for="department">Khoa/Bộ môn *</label>
-          <div>
-            <select id="department" v-model="form.department">
-              <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
+          <label>Giới tính / Số điện thoại</label>
+          <div class="inline-row inline-gender-phone">
+            <select id="gender" v-model="form.gender">
+              <option value="Nam">Nam</option>
+              <option value="Nữ">Nữ</option>
             </select>
-            <p v-if="errors.department" class="error">{{ errors.department }}</p>
+            <input id="phone" v-model="form.phone" type="text" maxlength="20" placeholder="Số điện thoại" />
           </div>
 
           <label for="email">Email</label>
@@ -279,11 +298,22 @@ async function submitForm() {
             <p v-if="errors.email" class="error">{{ errors.email }}</p>
           </div>
 
+          <label for="academic_title">Học hàm</label>
+          <input id="academic_title" v-model="form.academic_title" type="text" maxlength="50" placeholder="Ví dụ: ThS, TS, PGS..." />
+
+          <label for="department">Mã khoa *</label>
+          <div>
+            <select id="department" v-model="form.department" :disabled="loadingFaculties">
+              <option value="" disabled>{{ loadingFaculties ? 'Đang tải mã khoa...' : 'Chọn mã khoa' }}</option>
+              <option v-for="faculty in facultyOptions" :key="faculty.code" :value="faculty.code">
+                {{ faculty.code }} - {{ faculty.name }}
+              </option>
+            </select>
+            <p v-if="errors.department" class="error">{{ errors.department }}</p>
+          </div>
+
           <label for="homeroom_class">Lớp phụ trách</label>
           <input id="homeroom_class" v-model="form.homeroom_class" type="text" maxlength="40" placeholder="Để trống nếu không chủ nhiệm lớp nào" />
-
-          <label for="phone">Số điện thoại</label>
-          <input id="phone" v-model="form.phone" type="text" maxlength="20" />
 
           <label for="status">Trạng thái</label>
           <select id="status" v-model="form.status">
@@ -296,14 +326,14 @@ async function submitForm() {
         <p v-if="serverMessage" class="error">{{ serverMessage }}</p>
         <p class="import-hint">
           Cột mặc định file import:
-          <b>MSGV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Khoa/Bộ môn</b>, <b>Email</b>, <b>Lớp phụ trách</b>, <b>SĐT</b>, <b>Trạng thái</b>.
+          <b>MSGV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Email</b>, <b>SĐT</b>, <b>Học hàm</b>, <b>Mã khoa</b>, <b>Lớp phụ trách</b>, <b>Trạng thái</b>.
         </p>
         <div class="actions">
           <button type="submit" class="btn-primary">Xác nhận</button>
           <button type="button" class="btn-file" :disabled="saving" @click="triggerImportFile">
             {{ saving ? 'Đang đọc file...' : 'Thêm file' }}
           </button>
-          <button type="button" class="btn-ghost" @click="router.push('/')">Trang chủ</button>
+          <button type="button" class="btn-ghost" @click="router.push('/teachers/search')">Quay lại</button>
         </div>
         <input
           ref="fileInputRef"
@@ -317,14 +347,15 @@ async function submitForm() {
       <div v-else-if="step === 'confirm'" class="confirm-box">
         <h2>Xác nhận thông tin</h2>
         <div class="grid">
-          <span class="label">MSGV</span><span>{{ form.teacher_code }}</span>
+          <span class="label">Mã giảng viên</span><span>{{ form.teacher_code }}</span>
           <span class="label">Họ tên</span><span>{{ form.full_name }}</span>
           <span class="label">Ngày sinh</span><span>{{ form.date_of_birth || '-' }}</span>
           <span class="label">Giới tính</span><span>{{ form.gender }}</span>
-          <span class="label">Khoa/Bộ môn</span><span>{{ form.department }}</span>
           <span class="label">Email</span><span>{{ form.email || '-' }}</span>
-          <span class="label">Lớp phụ trách</span><span>{{ form.homeroom_class || '-' }}</span>
           <span class="label">Số điện thoại</span><span>{{ form.phone || '-' }}</span>
+          <span class="label">Học hàm</span><span>{{ form.academic_title || '-' }}</span>
+          <span class="label">Mã khoa</span><span>{{ form.department || '-' }}</span>
+          <span class="label">Lớp phụ trách</span><span>{{ form.homeroom_class || '-' }}</span>
           <span class="label">Trạng thái</span><span>{{ form.status }}</span>
         </div>
         <p v-if="serverMessage" class="error">{{ serverMessage }}</p>
@@ -350,10 +381,11 @@ async function submitForm() {
                 <th>Họ tên</th>
                 <th>Ngày sinh</th>
                 <th>Giới tính</th>
-                <th>Khoa/Bộ môn</th>
                 <th>Email</th>
-                <th>Lớp phụ trách</th>
                 <th>SĐT</th>
+                <th>Học hàm</th>
+                <th>Mã khoa</th>
+                <th>Lớp phụ trách</th>
                 <th>Trạng thái</th>
               </tr>
             </thead>
@@ -363,10 +395,11 @@ async function submitForm() {
                 <td>{{ row.full_name }}</td>
                 <td>{{ row.date_of_birth || '-' }}</td>
                 <td>{{ row.gender || '-' }}</td>
-                <td>{{ row.department || '-' }}</td>
                 <td>{{ row.email || '-' }}</td>
-                <td>{{ row.homeroom_class || '-' }}</td>
                 <td>{{ row.phone || '-' }}</td>
+                <td>{{ row.academic_title || '-' }}</td>
+                <td>{{ row.department || '-' }}</td>
+                <td>{{ row.homeroom_class || '-' }}</td>
                 <td>{{ row.status || '-' }}</td>
               </tr>
             </tbody>
@@ -391,8 +424,8 @@ async function submitForm() {
           <b>{{ accountInfo.default_password }}</b>
         </p>
         <div class="actions">
-          <button class="btn-primary" @click="router.push('/teachers/search')">Tìm kiếm giáo viên</button>
-          <button class="btn-ghost" @click="router.push('/')">Trang chủ</button>
+          <button class="btn-primary" @click="router.push('/teachers/search')">Quản lý giảng viên</button>
+          <button class="btn-ghost" @click="router.push('/teachers/search')">Quay lại</button>
         </div>
       </div>
 
@@ -406,8 +439,8 @@ async function submitForm() {
           <b>{{ accountInfo.default_password }}</b>
         </p>
         <div class="actions">
-          <button class="btn-primary" @click="router.push('/teachers/search')">Tìm kiếm giáo viên</button>
-          <button class="btn-ghost" @click="router.push('/')">Trang chủ</button>
+          <button class="btn-primary" @click="router.push('/teachers/search')">Quản lý giảng viên</button>
+          <button class="btn-ghost" @click="router.push('/teachers/search')">Quay lại</button>
         </div>
       </div>
     </div>
@@ -470,6 +503,15 @@ select {
   border-radius: 8px;
   padding: 10px 12px;
   font-size: 14px;
+}
+
+.inline-row {
+  display: grid;
+  gap: 10px;
+}
+
+.inline-gender-phone {
+  grid-template-columns: 160px 1fr;
 }
 
 .actions {
@@ -570,6 +612,10 @@ button {
 
 @media (max-width: 760px) {
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-gender-phone {
     grid-template-columns: 1fr;
   }
 }

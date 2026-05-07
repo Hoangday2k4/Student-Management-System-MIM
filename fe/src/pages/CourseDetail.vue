@@ -14,6 +14,29 @@ const students = ref([])
 const isStaff = computed(() => accountType.value === 'staff')
 const isTeacher = computed(() => accountType.value === 'teacher')
 
+function splitItems(value) {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
+const scheduleRoomText = computed(() => {
+  if (!course.value) return '-'
+  const schedules = splitItems(course.value.schedule)
+  const rooms = splitItems(course.value.classroom)
+  const max = Math.max(schedules.length, rooms.length)
+  if (!max) return '-'
+
+  const pairs = []
+  for (let i = 0; i < max; i += 1) {
+    const sch = schedules[i] || '-'
+    const room = rooms[i] || '-'
+    pairs.push(`${sch} : ${room}`)
+  }
+  return pairs.join(', ')
+})
+
 const searchQuery = computed(() => {
   const q = {}
   const keyword = String(route.query.keyword || '').trim()
@@ -29,6 +52,10 @@ const searchQuery = computed(() => {
 })
 
 function goBackToSearch() {
+  if (route.name === 'section-detail') {
+    router.push({ path: '/sections/manage', query: searchQuery.value })
+    return
+  }
   if (isStaff.value) {
     router.push({ path: '/courses/manage', query: searchQuery.value })
     return
@@ -42,6 +69,10 @@ function goBackToSearch() {
 
 function goUpdate() {
   if (!course.value?.id) return
+  if (route.name === 'section-detail') {
+    router.push({ path: '/sections/update', query: { id: String(course.value.id), ...searchQuery.value } })
+    return
+  }
   router.push({ path: '/courses/update', query: { id: String(course.value.id), ...searchQuery.value } })
 }
 
@@ -85,21 +116,74 @@ onMounted(loadPage)
 <template>
   <div class="page">
     <div class="card">
-      <h1>Chi tiết môn học</h1>
+      <h1>Chi tiết học phần</h1>
 
       <p v-if="loading" class="state">Đang tải dữ liệu...</p>
       <p v-else-if="errorMessage" class="state error">{{ errorMessage }}</p>
       <template v-else-if="course">
         <div class="info-grid">
-          <span class="label">Mã môn</span><span>{{ course.course_code }}</span>
-          <span class="label">Tên môn</span><span>{{ course.course_name }}</span>
-          <span class="label">Số tín chỉ</span><span>{{ course.credits ?? '-' }}</span>
-          <span class="label">Giáo viên</span><span>{{ course.teacher_name || course.teacher_code }}</span>
-          <span class="label">Khoa/Bộ môn</span><span>{{ course.department || '-' }}</span>
-          <span class="label">Lịch học</span><span>{{ course.schedule || '-' }}</span>
-          <span class="label">Phòng học</span><span>{{ course.classroom || '-' }}</span>
-          <span class="label">Số lượng tối đa</span><span>{{ course.max_students || '-' }}</span>
-          <span class="label">Số SV hiện có</span><span>{{ course.enrolled_count || 0 }}</span>
+          <div class="info-row">
+            <div class="info-pair">
+              <span class="label">Mã môn</span>
+              <span>{{ course.course_code }}</span>
+            </div>
+            <div class="info-pair">
+              <span class="label">Mã học phần</span>
+              <span>{{ course.section_code || '-' }}</span>
+            </div>
+          </div>
+
+          <div class="info-row">
+            <div class="info-pair">
+              <span class="label">Tên môn</span>
+              <span>{{ course.course_name }}</span>
+            </div>
+            <div class="info-pair">
+              <span class="label">Số tín chỉ</span>
+              <span>{{ course.credits ?? '-' }}</span>
+            </div>
+          </div>
+
+          <div class="info-row">
+            <div class="info-pair">
+              <span class="label">Học kỳ</span>
+              <span>{{ course.semester ?? '-' }}</span>
+            </div>
+            <div class="info-pair">
+              <span class="label">Năm học</span>
+              <span>{{ course.academic_year || '-' }}</span>
+            </div>
+          </div>
+
+          <div class="info-row">
+            <div class="info-pair">
+              <span class="label">Giáo viên</span>
+              <span>{{ course.teacher_name || course.teacher_code }}</span>
+            </div>
+            <div class="info-pair">
+              <span class="label">Khoa</span>
+              <span>{{ course.department || '-' }}</span>
+            </div>
+          </div>
+
+          <div class="info-row">
+            <div class="info-pair full-pair">
+              <span class="label label-nowrap">Lịch học / Phòng học</span>
+              <span>{{ scheduleRoomText }}</span>
+            </div>
+            <div class="info-pair">
+              <span class="label">Số SV hiện có</span>
+              <span>{{ course.enrolled_count || 0 }}</span>
+            </div>
+          </div>
+
+          <div class="info-row">
+            <div class="info-pair">
+              <span class="label">Số lượng tối đa</span>
+              <span>{{ course.max_students || '-' }}</span>
+            </div>
+            <div></div>
+          </div>
         </div>
 
         <h2>Danh sách sinh viên</h2>
@@ -131,7 +215,7 @@ onMounted(loadPage)
 
         <div class="actions">
           <button v-if="isStaff" class="btn-primary" @click="goUpdate">Cập nhật</button>
-          <button class="btn-ghost" @click="goBackToSearch">Trở về</button>
+          <button class="btn-ghost" @click="goBackToSearch">Quay lại</button>
         </div>
       </template>
     </div>
@@ -139,12 +223,27 @@ onMounted(loadPage)
 </template>
 
 <style scoped>
-.page { height: 100%; }
-.card { max-width: 1200px; height: 100%; min-height: 0; background: #fff; border: 1px solid #cfcfcf; padding: 24px; display: flex; flex-direction: column; }
+.page {
+  height: auto !important;
+  overflow: visible !important;
+}
+.card {
+  max-width: 1300px;
+  height: auto !important;
+  min-height: 0 !important;
+  background: #fff;
+  border: 1px solid #cfcfcf;
+  padding: 24px;
+  display: block !important;
+}
 h1, h2 { color: #007336; margin: 0 0 14px; }
 h2 { margin-top: 22px; }
-.info-grid { display: grid; grid-template-columns: 180px 1fr; gap: 8px 12px; }
+.info-grid { display: flex; flex-direction: column; gap: 4px; }
+.info-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.info-pair { display: grid; grid-template-columns: 190px 1fr; align-items: start; gap: 10px; }
+.full-pair { grid-template-columns: 190px 1fr; }
 .label { font-weight: 700; color: #1f3553; }
+.label-nowrap { white-space: nowrap; }
 .state { background: #f4f7fc; padding: 12px; border-radius: 8px; }
 .state.error { color: #c52a2a; background: #fdeeee; }
 .table-scroll { margin-top: 10px; overflow: auto; max-height: 320px; min-height: 0; }
@@ -156,6 +255,8 @@ h2 { margin-top: 22px; }
 .btn-primary { background: #007336; color: #fff; }
 .btn-ghost { background: #e9eef6; color: #006131; }
 @media (max-width: 900px) {
-  .info-grid { grid-template-columns: 1fr; }
+  .info-row { grid-template-columns: 1fr; gap: 8px; }
+  .info-pair,
+  .full-pair { grid-template-columns: 1fr; gap: 2px; }
 }
 </style>

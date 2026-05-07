@@ -1,11 +1,14 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
-import { FACULTY_OPTIONS } from '@/constants/options'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
 
 const loading = ref(false)
 const searched = ref(false)
 const teachers = ref([])
 const errorMessage = ref('')
+const successMessage = ref('')
 const isAdmin = ref(false)
 
 const modalOpen = ref(false)
@@ -16,8 +19,6 @@ const currentTeacherCode = ref('')
 
 const filters = reactive({
   keyword: '',
-  department: '',
-  status: '',
 })
 
 const editForm = reactive({
@@ -25,6 +26,7 @@ const editForm = reactive({
   full_name: '',
   date_of_birth: '',
   gender: 'Nam',
+  academic_title: '',
   department: '',
   homeroom_class: '',
   email: '',
@@ -32,13 +34,62 @@ const editForm = reactive({
   status: 'Đang công tác',
 })
 
+const summary = computed(() => {
+  const total = teachers.value.length
+  let working = 0
+  let senior = 0
+  let retired = 0
+
+  for (const teacher of teachers.value) {
+    const status = statusLabel(teacher?.status)
+    const title = String(teacher?.academic_title || '').trim()
+    if (status === 'Đang công tác') working += 1
+    if (status === 'Đã nghỉ') retired += 1
+    if (title !== '' && title !== '-') senior += 1
+  }
+
+  return { total, working, senior, retired }
+})
+
+function teacherBadge(name, code) {
+  const cleanName = String(name || '').trim()
+  const parts = cleanName.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
+  if (parts.length === 1 && parts[0].length >= 2) return parts[0].slice(0, 2).toUpperCase()
+  const c = String(code || '').trim()
+  return (c.slice(-2) || 'GV').toUpperCase()
+}
+
+function normalizeText(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function statusLabel(status) {
+  const s = normalizeText(status)
+  if (['đang công tác', 'dang cong tac', 'đang dạy', 'dang day', 'working'].includes(s)) return 'Đang công tác'
+  if (['tạm nghỉ', 'tam nghi', 'on_leave'].includes(s)) return 'Tạm nghỉ'
+  if (['đã nghỉ', 'da nghi', 'nghỉ hưu', 'nghi huu', 'retired'].includes(s)) return 'Đã nghỉ'
+  return status || '-'
+}
+
+function genderLabel(gender) {
+  const s = normalizeText(gender)
+  if (['nam', 'male'].includes(s)) return 'Nam'
+  if (['nữ', 'nu', 'female'].includes(s)) return 'Nữ'
+  return gender || '-'
+}
+
+function openCreate() {
+  router.push({ name: 'teacher-create' })
+}
+
 async function loadIdentity() {
   try {
     const res = await fetch('/api/home')
     if (!res.ok) return
     const data = await res.json().catch(() => ({}))
     isAdmin.value = String(data?.login_id || '').toLowerCase() === 'admin'
-  } catch (error) {
+  } catch {
     isAdmin.value = false
   }
 }
@@ -46,8 +97,6 @@ async function loadIdentity() {
 function buildQuery() {
   const params = new URLSearchParams()
   if (filters.keyword.trim()) params.append('keyword', filters.keyword.trim())
-  if (filters.department.trim()) params.append('department', filters.department.trim())
-  if (filters.status.trim()) params.append('status', filters.status.trim())
   return params.toString()
 }
 
@@ -55,17 +104,18 @@ async function doSearch() {
   searched.value = true
   loading.value = true
   errorMessage.value = ''
+  successMessage.value = ''
   try {
     const query = buildQuery()
     const res = await fetch(query ? `/api/teachers?${query}` : '/api/teachers')
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
-      errorMessage.value = data.message || data.error || 'Không thể tải dữ liệu tìm kiếm.'
+      errorMessage.value = data.message || data.error || 'Không thể tải dữ liệu giảng viên.'
       teachers.value = []
       return
     }
     teachers.value = Array.isArray(data) ? data : []
-  } catch (error) {
+  } catch {
     errorMessage.value = 'Không kết nối được máy chủ.'
     teachers.value = []
   } finally {
@@ -78,6 +128,7 @@ function fillEditForm(teacher) {
   editForm.full_name = String(teacher?.full_name || '')
   editForm.date_of_birth = String(teacher?.date_of_birth || '')
   editForm.gender = String(teacher?.gender || 'Nam') || 'Nam'
+  editForm.academic_title = String(teacher?.academic_title || '')
   editForm.department = String(teacher?.department || '')
   editForm.homeroom_class = String(teacher?.homeroom_class || '')
   editForm.email = String(teacher?.email || '')
@@ -93,11 +144,11 @@ async function fetchTeacherDetail(teacherCode) {
     const res = await fetch(`/api/teachers/detail?teacher_code=${encoded}`)
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.status !== 'success') {
-      modalError.value = data.message || 'Không tải được thông tin giáo viên.'
+      modalError.value = data.message || 'Không tải được thông tin giảng viên.'
       return
     }
     fillEditForm(data.data || {})
-  } catch (error) {
+  } catch {
     modalError.value = 'Không kết nối được máy chủ.'
   } finally {
     modalLoading.value = false
@@ -114,10 +165,9 @@ async function openView(teacher) {
 
 async function openEdit(teacher) {
   if (!isAdmin.value) return
-  modalMode.value = 'edit'
-  currentTeacherCode.value = String(teacher?.teacher_code || '')
-  modalOpen.value = true
-  await fetchTeacherDetail(currentTeacherCode.value)
+  const teacherCode = String(teacher?.teacher_code || '').trim()
+  if (!teacherCode) return
+  router.push({ name: 'teacher-admin-edit', query: { teacher_code: teacherCode } })
 }
 
 function closeModal() {
@@ -135,6 +185,7 @@ async function saveEdit() {
       full_name: editForm.full_name.trim(),
       date_of_birth: editForm.date_of_birth.trim(),
       gender: editForm.gender,
+      academic_title: editForm.academic_title.trim(),
       department: editForm.department.trim(),
       homeroom_class: editForm.homeroom_class.trim(),
       email: editForm.email.trim(),
@@ -148,12 +199,13 @@ async function saveEdit() {
     })
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.status !== 'success') {
-      modalError.value = data.message || 'Không thể cập nhật giáo viên.'
+      modalError.value = data.message || 'Không thể cập nhật giảng viên.'
       return
     }
     closeModal()
+    successMessage.value = 'Đã cập nhật thông tin giảng viên.'
     await doSearch()
-  } catch (error) {
+  } catch {
     modalError.value = 'Không kết nối được máy chủ.'
   }
 }
@@ -162,7 +214,7 @@ async function deleteTeacher(teacher) {
   if (!isAdmin.value) return
   const teacherCode = String(teacher?.teacher_code || '')
   if (!teacherCode) return
-  const ok = window.confirm(`Bạn có chắc muốn xóa giáo viên ${teacherCode} và tài khoản liên quan không?`)
+  const ok = window.confirm(`Bạn có chắc muốn xóa giảng viên ${teacherCode} và tài khoản liên quan không?`)
   if (!ok) return
 
   errorMessage.value = ''
@@ -170,83 +222,104 @@ async function deleteTeacher(teacher) {
     const res = await fetch(`/api/teachers?teacher_code=${encodeURIComponent(teacherCode)}`, { method: 'DELETE' })
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.status !== 'success') {
-      errorMessage.value = data.message || 'Không thể xóa giáo viên.'
+      errorMessage.value = data.message || 'Không thể xóa giảng viên.'
       return
     }
+    successMessage.value = `Đã xóa giảng viên ${teacherCode}.`
     await doSearch()
-  } catch (error) {
+  } catch {
     errorMessage.value = 'Không kết nối được máy chủ.'
   }
 }
 
 onMounted(async () => {
   await loadIdentity()
+  await doSearch()
 })
 </script>
 
 <template>
   <div class="page">
     <div class="card">
-      <h1>Tìm kiếm giáo viên</h1>
-
-      <div class="filter-grid">
+      <div class="header-row">
         <div>
-          <label>Từ khóa</label>
-          <input v-model="filters.keyword" type="text" placeholder="Mã GV, họ tên, email, số điện thoại..." />
+          <h1>Quản lý giảng viên</h1>
+          <p class="subtitle">Quản lý đội ngũ giảng viên khoa/trường.</p>
         </div>
-        <div>
-          <label>Khoa/Bộ môn</label>
-          <select v-model="filters.department">
-            <option value="">Tất cả</option>
-            <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
-          </select>
-        </div>
-        <div>
-          <label>Trạng thái</label>
-          <select v-model="filters.status">
-            <option value="">Tất cả</option>
-            <option value="Đang công tác">Đang công tác</option>
-            <option value="Tạm nghỉ">Tạm nghỉ</option>
-            <option value="Đã nghỉ">Đã nghỉ</option>
-          </select>
-        </div>
+        <button v-if="isAdmin" class="btn-add" type="button" @click="openCreate">+ Thêm giảng viên</button>
       </div>
 
-      <div class="actions">
-        <button class="btn-primary" @click="doSearch">Tra cứu</button>
-        <RouterLink class="btn-ghost" to="/">Trang chủ</RouterLink>
+      <div class="stats-grid">
+        <article class="stat-card stat-total">
+          <div class="stat-label">Tổng giảng viên</div>
+          <div class="stat-value">{{ summary.total }}</div>
+        </article>
+        <article class="stat-card stat-working">
+          <div class="stat-label">Đang dạy</div>
+          <div class="stat-value">{{ summary.working }}</div>
+        </article>
+        <article class="stat-card stat-senior">
+          <div class="stat-label">Học hàm/Học vị cao</div>
+          <div class="stat-value">{{ summary.senior }}</div>
+        </article>
+        <article class="stat-card stat-retired">
+          <div class="stat-label">Nghỉ hưu</div>
+          <div class="stat-value">{{ summary.retired }}</div>
+        </article>
       </div>
 
-      <div v-if="searched" class="result-wrap">
-        <p class="count">Số kết quả: <b>{{ teachers.length }}</b></p>
+      <div class="toolbar">
+        <input
+          v-model="filters.keyword"
+          type="text"
+          placeholder="Tìm kiếm theo tên hoặc MSGV..."
+          @keyup.enter="doSearch"
+        />
+        <button class="btn-primary" type="button" @click="doSearch">Tra cứu</button>
+      </div>
 
+      <p v-if="successMessage" class="success">{{ successMessage }}</p>
+      <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
+
+      <div class="table-wrap">
         <div v-if="loading" class="state">Đang tải dữ liệu...</div>
-        <div v-else-if="errorMessage" class="state error-state">{{ errorMessage }}</div>
-        <div v-else-if="teachers.length === 0" class="state">Không tìm thấy giáo viên phù hợp.</div>
-
+        <div v-else-if="searched && teachers.length === 0" class="state">Không tìm thấy giảng viên phù hợp.</div>
         <div v-else class="table-scroll">
           <table class="result-table">
             <thead>
               <tr>
-                <th>Mã GV</th>
-                <th>Họ tên</th>
-                <th>Khoa/Bộ môn</th>
-                <th>Lớp phụ trách</th>
-                <th>Email</th>
-                <th>SĐT</th>
+                <th>Giảng viên</th>
+                <th>Học vị</th>
+                <th>Khoa</th>
+                <th>Liên hệ</th>
                 <th>Trạng thái</th>
                 <th v-if="isAdmin">Action</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="teacher in teachers" :key="teacher.id">
-                <td>{{ teacher.teacher_code }}</td>
-                <td>{{ teacher.full_name }}</td>
+              <tr v-for="teacher in teachers" :key="teacher.teacher_code">
+                <td>
+                  <div class="class-info">
+                    <span class="class-badge">{{ teacherBadge(teacher.full_name, teacher.teacher_code) }}</span>
+                    <div>
+                      <div class="class-name">{{ teacher.full_name || '-' }}</div>
+                      <div class="class-sub">MSGV: {{ teacher.teacher_code || '-' }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <span class="title-chip">{{ teacher.academic_title || '-' }}</span>
+                </td>
                 <td>{{ teacher.department || '-' }}</td>
-                <td>{{ teacher.homeroom_class || '-' }}</td>
-                <td>{{ teacher.email || '-' }}</td>
-                <td>{{ teacher.phone || '-' }}</td>
-                <td>{{ teacher.status || '-' }}</td>
+                <td>
+                  <div class="main">{{ teacher.email || '-' }}</div>
+                  <div class="class-sub">{{ teacher.phone || '-' }}</div>
+                </td>
+                <td>
+                  <span class="status-chip" :class="{ paused: statusLabel(teacher.status) === 'Tạm nghỉ', retired: statusLabel(teacher.status) === 'Đã nghỉ' }">
+                    {{ statusLabel(teacher.status) }}
+                  </span>
+                </td>
                 <td v-if="isAdmin" class="action-cell">
                   <button type="button" class="icon-btn" title="Xem" @click="openView(teacher)">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -276,51 +349,52 @@ onMounted(async () => {
 
     <div v-if="modalOpen" class="modal-backdrop" @click.self="closeModal">
       <div class="modal-card">
-        <h2>{{ modalMode === 'view' ? 'Chi tiết giáo viên' : 'Sửa thông tin giáo viên' }}</h2>
+        <h2>{{ modalMode === 'view' ? 'Chi tiết giảng viên' : 'Sửa thông tin giảng viên' }}</h2>
         <div v-if="modalLoading" class="state">Đang tải dữ liệu...</div>
         <div v-else-if="modalError" class="state error-state">{{ modalError }}</div>
         <template v-else>
           <div v-if="modalMode === 'view'" class="detail-grid">
-            <div><b>Mã GV:</b> {{ editForm.teacher_code || '-' }}</div>
+            <div><b>MSGV:</b> {{ editForm.teacher_code || '-' }}</div>
             <div><b>Họ tên:</b> {{ editForm.full_name || '-' }}</div>
             <div><b>Ngày sinh:</b> {{ editForm.date_of_birth || '-' }}</div>
-            <div><b>Giới tính:</b> {{ editForm.gender || '-' }}</div>
+            <div><b>Giới tính:</b> {{ genderLabel(editForm.gender) }}</div>
+            <div><b>Học hàm/Học vị:</b> {{ editForm.academic_title || '-' }}</div>
             <div><b>Khoa/Bộ môn:</b> {{ editForm.department || '-' }}</div>
             <div><b>Lớp phụ trách:</b> {{ editForm.homeroom_class || '-' }}</div>
             <div><b>Email:</b> {{ editForm.email || '-' }}</div>
-            <div><b>SĐT:</b> {{ editForm.phone || '-' }}</div>
-            <div><b>Trạng thái:</b> {{ editForm.status || '-' }}</div>
+            <div><b>Số điện thoại:</b> {{ editForm.phone || '-' }}</div>
+            <div><b>Trạng thái:</b> {{ statusLabel(editForm.status) }}</div>
           </div>
           <div v-else class="edit-grid">
-            <label>Mã GV</label>
+            <label>Mã giảng viên *</label>
             <input v-model="editForm.teacher_code" type="text" />
 
-            <label>Họ tên</label>
+            <label>Họ tên *</label>
             <input v-model="editForm.full_name" type="text" />
 
             <label>Ngày sinh</label>
             <input v-model="editForm.date_of_birth" type="date" />
 
-            <label>Giới tính</label>
-            <select v-model="editForm.gender">
-              <option value="Nam">Nam</option>
-              <option value="Nữ">Nữ</option>
-            </select>
-
-            <label>Khoa/Bộ môn</label>
-            <select v-model="editForm.department">
-              <option value="">-- Chọn khoa/bộ môn --</option>
-              <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
-            </select>
-
-            <label>Lớp phụ trách</label>
-            <input v-model="editForm.homeroom_class" type="text" />
+            <label>Giới tính / Số điện thoại</label>
+            <div class="inline-row inline-gender-phone">
+              <select v-model="editForm.gender">
+                <option value="Nam">Nam</option>
+                <option value="Nữ">Nữ</option>
+              </select>
+              <input v-model="editForm.phone" type="text" placeholder="Số điện thoại" />
+            </div>
 
             <label>Email</label>
             <input v-model="editForm.email" type="email" />
 
-            <label>SĐT</label>
-            <input v-model="editForm.phone" type="text" />
+            <label>Học hàm</label>
+            <input v-model="editForm.academic_title" type="text" placeholder="Ví dụ: ThS, TS, PGS..." />
+
+            <label>Khoa (mã ngành) *</label>
+            <input v-model="editForm.department" type="text" placeholder="Ví dụ: TCTIN" />
+
+            <label>Lớp phụ trách</label>
+            <input v-model="editForm.homeroom_class" type="text" placeholder="Để trống nếu không chủ nhiệm lớp nào" />
 
             <label>Trạng thái</label>
             <select v-model="editForm.status">
@@ -340,179 +414,180 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.page {
-  padding: 0;
-  height: 100%;
-}
-
+.page { height: 100%; }
 .card {
-  max-width: 1200px;
+  max-width: 1300px;
   height: 100%;
   min-height: 0;
   margin: 0;
   background: #fff;
   border: 1px solid #cfcfcf;
-  border-radius: 0;
-  box-shadow: none;
   padding: 24px;
   display: flex;
   flex-direction: column;
-}
-
-h1 {
-  margin: 0 0 18px;
-  color: #007336;
-}
-
-.filter-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 14px;
 }
 
-label {
-  display: block;
-  margin-bottom: 6px;
-  font-weight: 600;
-  color: #33435c;
+.header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+h1 { margin: 0; color: #007336; }
+.subtitle { margin: 5px 0 0; color: #2f4565; }
+
+.btn-add {
+  border: none;
+  border-radius: 10px;
+  background: #0f8f54;
+  color: #fff;
+  padding: 10px 16px;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(15, 143, 84, 0.2);
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat-card {
+  border: 1px solid #d4dceb;
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.stat-total { background: #edf6ff; }
+.stat-working { background: #eafaf1; }
+.stat-senior { background: #f6efff; }
+.stat-retired { background: #fff3f3; }
+
+.stat-label { color: #4a5a72; font-size: 13px; }
+.stat-value { margin-top: 6px; color: #0c274f; font-size: 34px; line-height: 1; font-weight: 800; }
+
+.toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
 }
 
 input,
 select {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid #c7d3e2;
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 14px;
-}
-
-.actions {
-  margin-top: 14px;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.btn-primary,
-.btn-ghost {
-  border: none;
-  border-radius: 8px;
-  padding: 10px 16px;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
+  border: 1px solid #b7c9df;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 15px;
 }
 
 .btn-primary {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-weight: 700;
+  cursor: pointer;
   background: #007336;
-  color: white;
+  color: #fff;
 }
 
 .btn-ghost {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-weight: 700;
+  cursor: pointer;
   background: #e9eef6;
   color: #006131;
 }
 
-.result-wrap {
-  margin-top: 20px;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.count {
-  color: #415471;
-}
-
-.state {
-  margin-top: 14px;
-  padding: 12px;
+.success, .error {
+  margin: 0;
+  padding: 10px 12px;
   border-radius: 8px;
-  background: #f4f7fc;
-  color: #607086;
 }
+.success { background: #eefaf2; color: #177144; }
+.error { background: #fdeeee; color: #b72a2a; }
 
-.error-state {
-  color: #b72a2a;
-  background: #fdeeee;
-}
+.table-wrap { min-height: 0; display: flex; flex-direction: column; }
+.state { padding: 12px; border-radius: 8px; background: #f4f7fc; color: #607086; }
+.error-state { color: #b72a2a; background: #fdeeee; }
 
-.table-scroll {
-  margin-top: 10px;
-  overflow: auto;
-  min-height: 0;
-  flex: 1;
-  max-height: 320px;
-}
-
-.result-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
+.table-scroll { overflow: auto; min-height: 0; max-height: 430px; }
+.result-table { width: 100%; border-collapse: collapse; }
 .result-table th,
 .result-table td {
   border-bottom: 1px solid #e3e9f2;
   padding: 10px 8px;
   text-align: left;
-  vertical-align: top;
+  vertical-align: middle;
 }
-
 .result-table th {
   background: #f0f5fc;
-  color: #2f4565;
+  color: #0d3362;
   position: sticky;
   top: 0;
   z-index: 2;
 }
 
-.action-cell {
-  white-space: nowrap;
+.class-info { display: flex; gap: 10px; align-items: center; }
+.class-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #e51670, #2f72ff);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.class-name { font-weight: 700; font-size: 16px; }
+.class-sub { color: #607086; font-size: 12px; }
+.main { font-weight: 700; font-size: 15px; }
+
+.title-chip,
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
 }
 
+.title-chip { background: #f0f2ff; color: #3953b7; border: 1px solid #cfd8ff; }
+.status-chip { background: #e9f9ef; color: #0b7f43; border: 1px solid #b7e5cb; }
+.status-chip.paused { background: #fff8e8; color: #956200; border-color: #f0deac; }
+.status-chip.retired { background: #f6f0f0; color: #7d4747; border-color: #ddc9c9; }
+
+.action-cell { white-space: nowrap; }
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   margin-right: 8px;
-  border-radius: 6px;
+  border-radius: 9px;
   border: 1px solid #c7d3e2;
   background: #f8fbff;
+  color: #007336;
+  font-size: 0;
+  line-height: 0;
   cursor: pointer;
 }
-
-.icon-btn svg {
-  width: 16px;
-  height: 16px;
-  display: block;
-  fill: currentColor;
-}
-
-.icon-btn:hover {
-  background: #eaf5ee;
-  border-color: #9ec7ae;
-}
-
-.icon-btn {
-  color: #007336;
-}
-
-.danger-btn svg {
-  fill: currentColor;
-}
-
-.danger-btn {
-  color: #c62020;
-}
-
-.danger-btn:hover {
-  background: #fdeeee;
-  border-color: #e2a2a2;
-}
+.icon-btn svg { width: 16px; height: 16px; display: block; fill: currentColor; pointer-events: none; }
+.icon-btn:hover { background: #eaf5ee; border-color: #9ec7ae; }
+.danger-btn { color: #b72a2a; }
+.danger-btn:hover { background: #fdeeee; border-color: #e1aaaa; color: #962020; }
 
 .modal-backdrop {
   position: fixed;
@@ -521,55 +596,39 @@ select {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  z-index: 1000;
 }
 
 .modal-card {
-  width: min(760px, calc(100vw - 24px));
-  max-height: calc(100vh - 24px);
+  width: min(860px, 95vw);
+  max-height: 88vh;
   overflow: auto;
   background: #fff;
-  border-radius: 10px;
-  border: 1px solid #d8e2f1;
+  border: 1px solid #d7deea;
+  border-radius: 12px;
   padding: 18px;
 }
 
-.modal-card h2 {
-  margin: 0 0 10px;
-  color: #007336;
-}
-
-.detail-grid {
-  display: grid;
-  gap: 8px;
-}
-
-.edit-grid {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: 8px 12px;
-  align-items: center;
-}
-
+.modal-card h2 { margin: 0 0 12px; color: #007336; }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+.edit-grid { display: grid; grid-template-columns: 180px 1fr; gap: 8px 10px; align-items: center; }
 .edit-grid label {
-  margin: 0;
+  font-weight: 600;
+  color: #33435c;
+}
+.inline-row { display: grid; gap: 10px; }
+.inline-gender-phone { grid-template-columns: 160px 1fr; }
+.modal-actions { margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end; }
+
+@media (max-width: 1080px) {
+  .toolbar { grid-template-columns: 1fr; }
+  .header-row { flex-direction: column; align-items: stretch; }
+  .stats-grid { grid-template-columns: 1fr 1fr; }
 }
 
-.modal-actions {
-  margin-top: 14px;
-  display: flex;
-  gap: 8px;
-}
-
-@media (max-width: 980px) {
-  .filter-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 650px) {
-  .edit-grid {
-    grid-template-columns: 1fr;
-  }
+@media (max-width: 760px) {
+  .stats-grid { grid-template-columns: 1fr; }
+  .detail-grid, .edit-grid { grid-template-columns: 1fr; }
+  .inline-gender-phone { grid-template-columns: 1fr; }
 }
 </style>

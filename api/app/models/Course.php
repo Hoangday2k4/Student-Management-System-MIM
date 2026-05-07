@@ -1,7 +1,18 @@
 <?php
 
+require_once __DIR__ . '/Faculty.php';
+
 class Course
 {
+    private static function normalizeCourseType(?string $value): string
+    {
+        $text = strtoupper(trim((string)$value));
+        if ($text === 'TU_CHON' || $text === 'TỰ_CHỌN' || $text === 'TUY_CHON') {
+            return 'TU_CHON';
+        }
+        return 'BAT_BUOC';
+    }
+
     private static function lowerText(string $value): string
     {
         $value = trim($value);
@@ -57,22 +68,43 @@ class Course
 
     private static function resolveNganh(PDO $pdo, ?string $department): ?string
     {
-        $name = trim((string)$department);
-        if ($name === '') {
+        return Faculty::resolveIdByName($pdo, (string)$department);
+    }
+
+    private static function resolveNganhCode(PDO $pdo, ?string $department): ?string
+    {
+        $value = trim((string)$department);
+        if ($value === '') {
             return null;
         }
-        $stmt = $pdo->prepare('SELECT MaNganh FROM Nganh WHERE lower(TenNganh)=lower(:name) OR lower(MaNganh)=lower(:name) LIMIT 1');
-        $stmt->execute([':name' => $name]);
-        $id = $stmt->fetchColumn();
-        if ($id !== false) {
-            return (string)$id;
+
+        $stmt = $pdo->prepare('SELECT MaNganh FROM Nganh WHERE lower(MaNganh) = lower(:v) LIMIT 1');
+        $stmt->execute([':v' => $value]);
+        $code = $stmt->fetchColumn();
+        if ($code !== false && trim((string)$code) !== '') {
+            return trim((string)$code);
         }
-        $code = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $name) ?: 'NGANH');
-        if (strlen($code) > 12) $code = substr($code, 0, 12);
-        $ins = $pdo->prepare('INSERT OR IGNORE INTO Nganh (MaNganh, TenNganh, MoTa) VALUES (:code,:name,NULL)');
-        $ins->execute([':code' => $code, ':name' => $name]);
-        return $code;
+
+        $stmt = $pdo->prepare('SELECT MaNganh FROM Nganh WHERE lower(TenNganh) = lower(:v) LIMIT 1');
+        $stmt->execute([':v' => $value]);
+        $code = $stmt->fetchColumn();
+        if ($code !== false && trim((string)$code) !== '') {
+            return trim((string)$code);
+        }
+
+        $khoaCode = Faculty::resolveIdByName($pdo, $value);
+        if (is_string($khoaCode) && trim($khoaCode) !== '') {
+            $stmt = $pdo->prepare('SELECT MaNganh FROM Nganh WHERE lower(MaKhoa) = lower(:ma_khoa) ORDER BY MaNganh ASC LIMIT 1');
+            $stmt->execute([':ma_khoa' => trim($khoaCode)]);
+            $code = $stmt->fetchColumn();
+            if ($code !== false && trim((string)$code) !== '') {
+                return trim((string)$code);
+            }
+        }
+
+        return null;
     }
+
 
     private static function buildScheduleClassroom(PDO $pdo, string $maLHP): array
     {
@@ -106,13 +138,7 @@ class Course
         if (!$pdo) {
             $pdo = get_db_connection();
         }
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS Nganh (
-                MaNganh TEXT PRIMARY KEY,
-                TenNganh TEXT NOT NULL,
-                MoTa TEXT
-            )'
-        );
+        Faculty::ensureSchema($pdo);
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS MonHoc (
                 MaMon TEXT PRIMARY KEY,
@@ -243,14 +269,17 @@ class Course
     {
         self::ensureSchema($pdo);
         $maMon = trim((string)$data['course_code']);
-        $maLHP = $maMon . '-01';
-        $i = 1;
-        while (true) {
-            $stmt = $pdo->prepare('SELECT 1 FROM LopHocPhan WHERE MaLHP = :ma LIMIT 1');
-            $stmt->execute([':ma' => $maLHP]);
-            if (!$stmt->fetchColumn()) break;
-            $i++;
-            $maLHP = $maMon . '-' . str_pad((string)$i, 2, '0', STR_PAD_LEFT);
+        $maLHP = trim((string)($data['section_code'] ?? ''));
+        if ($maLHP === '') {
+            $maLHP = $maMon . '-01';
+            $i = 1;
+            while (true) {
+                $stmt = $pdo->prepare('SELECT 1 FROM LopHocPhan WHERE MaLHP = :ma LIMIT 1');
+                $stmt->execute([':ma' => $maLHP]);
+                if (!$stmt->fetchColumn()) break;
+                $i++;
+                $maLHP = $maMon . '-' . str_pad((string)$i, 2, '0', STR_PAD_LEFT);
+            }
         }
 
         $maNganh = self::resolveNganh($pdo, (string)($data['department'] ?? ''));
@@ -273,13 +302,15 @@ class Course
             'INSERT INTO LopHocPhan (
                 MaLHP, MaMon, MaGV, HocKy, NamHoc, SoLuongToiDa, TrongSoCC, TrongSoGK, TrongSoCK, CreatedAt
             ) VALUES (
-                :ma_lhp, :ma_mon, :ma_gv, NULL, NULL, :max, 0, 0, 0, CURRENT_TIMESTAMP
+                :ma_lhp, :ma_mon, :ma_gv, :hoc_ky, :nam_hoc, :max, 0, 0, 0, CURRENT_TIMESTAMP
             )'
         );
         $stmt->execute([
             ':ma_lhp' => $maLHP,
             ':ma_mon' => $maMon,
             ':ma_gv' => $data['teacher_code'] ?: null,
+            ':hoc_ky' => $data['semester'] !== null ? (int)$data['semester'] : null,
+            ':nam_hoc' => trim((string)($data['academic_year'] ?? '')) !== '' ? trim((string)$data['academic_year']) : null,
             ':max' => $data['max_students'] !== null ? (int)$data['max_students'] : null,
         ]);
 
@@ -332,12 +363,16 @@ class Course
             'UPDATE LopHocPhan
              SET MaMon = :ma_mon,
                  MaGV = :ma_gv,
+                 HocKy = :hoc_ky,
+                 NamHoc = :nam_hoc,
                  SoLuongToiDa = :max
              WHERE MaLHP = :ma_lhp'
         );
         $stmt->execute([
             ':ma_mon' => $newMaMon,
             ':ma_gv' => $data['teacher_code'] ?: null,
+            ':hoc_ky' => $data['semester'] !== null ? (int)$data['semester'] : null,
+            ':nam_hoc' => trim((string)($data['academic_year'] ?? '')) !== '' ? trim((string)$data['academic_year']) : null,
             ':max' => $data['max_students'] !== null ? (int)$data['max_students'] : null,
             ':ma_lhp' => $maLHP,
         ]);
@@ -438,11 +473,12 @@ class Course
         $maLHP = self::getMaLhpByLegacyId($pdo, $id);
         if (!$maLHP) return false;
         $stmt = $pdo->prepare(
-            'SELECT l.MaLHP, l.MaMon, l.MaGV, l.SoLuongToiDa, l.TrongSoCC, l.TrongSoGK, l.TrongSoCK, l.CreatedAt,
-                    m.TenMon, m.SoTinChi, n.TenNganh, g.HoTen AS teacher_name
+            'SELECT l.MaLHP, l.MaMon, l.MaGV, l.HocKy, l.NamHoc, l.SoLuongToiDa, l.TrongSoCC, l.TrongSoGK, l.TrongSoCK, l.CreatedAt,
+                    m.TenMon, m.SoTinChi, ng.TenNganh, n.TenKhoa, g.HoTen AS teacher_name
              FROM LopHocPhan l
              LEFT JOIN MonHoc m ON m.MaMon = l.MaMon
-             LEFT JOIN Nganh n ON n.MaNganh = m.MaNganh
+             LEFT JOIN Nganh ng ON ng.MaNganh = m.MaNganh
+             LEFT JOIN Khoa n ON n.MaKhoa = ng.MaKhoa
              LEFT JOIN GiangVien g ON g.MaGV = l.MaGV
              WHERE l.MaLHP = :ma_lhp
              LIMIT 1'
@@ -455,11 +491,14 @@ class Course
         $countStmt->execute([':ma_lhp' => $maLHP]);
         return [
             'id' => $id,
+            'section_code' => $row['MaLHP'] ?? '',
             'course_code' => $row['MaMon'] ?? '',
             'course_name' => $row['TenMon'] ?? '',
             'credits' => $row['SoTinChi'] !== null ? (int)$row['SoTinChi'] : null,
             'teacher_code' => $row['MaGV'] ?? '',
-            'department' => $row['TenNganh'] ?? '',
+            'semester' => $row['HocKy'] !== null ? (int)$row['HocKy'] : null,
+            'academic_year' => $row['NamHoc'] ?? '',
+            'department' => (($row['TenKhoa'] ?? '') !== '' ? (string)$row['TenKhoa'] : (string)($row['TenNganh'] ?? '')),
             'schedule' => $scheduleInfo['schedule'],
             'classroom' => $scheduleInfo['classroom'],
             'max_students' => $row['SoLuongToiDa'] !== null ? (int)$row['SoLuongToiDa'] : null,
@@ -490,11 +529,11 @@ class Course
         $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
         if (!$maLHP) return [];
         $stmt = $pdo->prepare(
-            'SELECT s.MaSV AS student_code, s.HoTen AS full_name, s.MaLop AS class_name, n.TenNganh AS faculty, s.Email AS email, s.SoDienThoai AS phone
+            'SELECT s.MaSV AS student_code, s.HoTen AS full_name, s.MaLop AS class_name, n.TenKhoa AS faculty, s.Email AS email, s.SoDienThoai AS phone
              FROM KetQuaHocTap k
              INNER JOIN SinhVien s ON s.MaSV = k.MaSV
              LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
-             LEFT JOIN Nganh n ON n.MaNganh = l.MaNganh
+             LEFT JOIN Khoa n ON n.MaKhoa = l.MaNganh
              WHERE k.MaLHP = :ma_lhp
              ORDER BY s.MaSV ASC'
         );
@@ -562,10 +601,11 @@ class Course
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $sql = 'SELECT m.MaMon, m.TenMon, m.SoTinChi, n.TenNganh, l.MaLHP, l.MaGV, l.SoLuongToiDa, l.CreatedAt, g.HoTen AS teacher_name
+        $sql = 'SELECT m.MaMon, m.TenMon, m.SoTinChi, ng.TenNganh, n.TenKhoa, l.MaLHP, l.MaGV, l.HocKy, l.NamHoc, l.SoLuongToiDa, l.CreatedAt, g.HoTen AS teacher_name
                 FROM LopHocPhan l
                 INNER JOIN MonHoc m ON m.MaMon = l.MaMon
-                LEFT JOIN Nganh n ON n.MaNganh = m.MaNganh
+                LEFT JOIN Nganh ng ON ng.MaNganh = m.MaNganh
+                LEFT JOIN Khoa n ON n.MaKhoa = ng.MaKhoa
                 LEFT JOIN GiangVien g ON g.MaGV = l.MaGV
                 WHERE 1=1';
         $params = [];
@@ -579,14 +619,14 @@ class Course
             $params[':keyword'] = '%' . self::lowerText((string)$filters['keyword']) . '%';
         }
         if (!empty($filters['department'])) {
-            $sql .= ' AND lower(IFNULL(n.TenNganh,"")) LIKE :department';
+            $sql .= ' AND lower(IFNULL(n.TenKhoa,"")) LIKE :department';
             $params[':department'] = '%' . self::lowerText((string)$filters['department']) . '%';
         }
         if (!empty($filters['teacher_code'])) {
             $sql .= ' AND lower(IFNULL(l.MaGV,"")) LIKE :teacher_code';
             $params[':teacher_code'] = '%' . self::lowerText((string)$filters['teacher_code']) . '%';
         }
-        $sql .= ' ORDER BY lower(IFNULL(n.TenNganh,"")) ASC, CAST(substr(m.MaMon,4) AS INTEGER) ASC, m.MaMon ASC LIMIT 500';
+        $sql .= ' ORDER BY lower(IFNULL(n.TenKhoa,"")) ASC, CAST(substr(m.MaMon,4) AS INTEGER) ASC, m.MaMon ASC LIMIT 500';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -598,11 +638,14 @@ class Course
             $cst->execute([':ma' => $row['MaLHP']]);
             $out[] = [
                 'id' => $id,
+                'section_code' => $row['MaLHP'] ?? '',
                 'course_code' => $row['MaMon'] ?? '',
                 'course_name' => $row['TenMon'] ?? '',
                 'credits' => $row['SoTinChi'] !== null ? (int)$row['SoTinChi'] : null,
                 'teacher_code' => $row['MaGV'] ?? '',
-                'department' => $row['TenNganh'] ?? '',
+                'semester' => $row['HocKy'] !== null ? (int)$row['HocKy'] : null,
+                'academic_year' => $row['NamHoc'] ?? '',
+                'department' => (($row['TenKhoa'] ?? '') !== '' ? (string)$row['TenKhoa'] : (string)($row['TenNganh'] ?? '')),
                 'schedule' => $sch['schedule'],
                 'classroom' => $sch['classroom'],
                 'max_students' => $row['SoLuongToiDa'] !== null ? (int)$row['SoLuongToiDa'] : null,
@@ -612,6 +655,268 @@ class Course
             ];
         }
         return $out;
+    }
+
+    public static function searchSubjectsForStaff(array $filters = []): array
+    {
+        self::ensureSchema();
+        $pdo = get_db_connection();
+
+        $sql = 'SELECT
+                    m.MaMon,
+                    m.TenMon,
+                    m.SoTinChi,
+                    m.LoaiMon,
+                    m.MaNganh,
+                    ng.TenNganh,
+                    k.MaKhoa,
+                    k.TenKhoa,
+                    COUNT(DISTINCT l.MaLHP) AS section_count
+                FROM MonHoc m
+                LEFT JOIN Nganh ng ON ng.MaNganh = m.MaNganh
+                LEFT JOIN Khoa k ON k.MaKhoa = ng.MaKhoa
+                LEFT JOIN LopHocPhan l ON l.MaMon = m.MaMon
+                WHERE 1=1';
+        $params = [];
+
+        if (!empty($filters['keyword'])) {
+            $sql .= ' AND (
+                lower(m.MaMon) LIKE :keyword
+                OR lower(m.TenMon) LIKE :keyword
+            )';
+            $params[':keyword'] = '%' . self::lowerText((string)$filters['keyword']) . '%';
+        }
+
+        if (!empty($filters['department'])) {
+            $dept = self::lowerText((string)$filters['department']);
+            $sql .= ' AND (
+                lower(IFNULL(k.MaKhoa, "")) = :department_exact
+                OR lower(IFNULL(k.TenKhoa, "")) LIKE :department_like
+                OR lower(IFNULL(ng.MaNganh, "")) = :department_exact
+                OR lower(IFNULL(ng.TenNganh, "")) LIKE :department_like
+            )';
+            $params[':department_exact'] = $dept;
+            $params[':department_like'] = '%' . $dept . '%';
+        }
+
+        $sql .= ' GROUP BY m.MaMon, m.TenMon, m.SoTinChi, m.LoaiMon, m.MaNganh, ng.TenNganh, k.MaKhoa, k.TenKhoa
+                  ORDER BY lower(IFNULL(k.TenKhoa,"")) ASC, CAST(substr(m.MaMon,4) AS INTEGER) ASC, m.MaMon ASC';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        return array_map(static function (array $row): array {
+            return [
+                'course_code' => trim((string)($row['MaMon'] ?? '')),
+                'course_name' => trim((string)($row['TenMon'] ?? '')),
+                'credits' => isset($row['SoTinChi']) ? (int)$row['SoTinChi'] : null,
+                'course_type' => self::normalizeCourseType((string)($row['LoaiMon'] ?? 'BAT_BUOC')),
+                'department_code' => trim((string)($row['MaNganh'] ?? '')),
+                'department_name' => trim((string)(($row['TenKhoa'] ?? '') !== '' ? $row['TenKhoa'] : ($row['TenNganh'] ?? ''))),
+                'section_count' => (int)($row['section_count'] ?? 0),
+            ];
+        }, $rows);
+    }
+
+    public static function insertSubjectWithPdo(PDO $pdo, array $data): array
+    {
+        self::ensureSchema($pdo);
+
+        $courseCode = strtoupper(trim((string)($data['course_code'] ?? '')));
+        $courseName = trim((string)($data['course_name'] ?? ''));
+        $creditsRaw = trim((string)($data['credits'] ?? ''));
+        $departmentRaw = trim((string)($data['department'] ?? ''));
+        $courseType = self::normalizeCourseType((string)($data['course_type'] ?? 'BAT_BUOC'));
+
+        if ($courseCode === '') {
+            throw new RuntimeException('Hãy nhập mã môn học.');
+        }
+        if ($courseName === '') {
+            throw new RuntimeException('Hãy nhập tên môn học.');
+        }
+        if ($creditsRaw === '' || !preg_match('/^\d+$/', $creditsRaw) || (int)$creditsRaw <= 0) {
+            throw new RuntimeException('Số tín chỉ phải là số nguyên dương.');
+        }
+
+        $departmentCode = self::resolveNganhCode($pdo, $departmentRaw);
+        if ($departmentRaw !== '' && !$departmentCode) {
+            throw new RuntimeException('Không tìm thấy ngành/khoa quản lý môn học.');
+        }
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO MonHoc (MaMon, TenMon, SoTinChi, LoaiMon, MaNganh)
+             VALUES (:ma_mon, :ten_mon, :so_tin_chi, :loai_mon, :ma_nganh)'
+        );
+        $stmt->execute([
+            ':ma_mon' => $courseCode,
+            ':ten_mon' => $courseName,
+            ':so_tin_chi' => (int)$creditsRaw,
+            ':loai_mon' => $courseType,
+            ':ma_nganh' => $departmentCode,
+        ]);
+
+        $q = $pdo->prepare(
+            'SELECT m.MaMon, m.TenMon, m.SoTinChi, m.LoaiMon, m.MaNganh, ng.TenNganh, k.TenKhoa
+             FROM MonHoc m
+             LEFT JOIN Nganh ng ON ng.MaNganh = m.MaNganh
+             LEFT JOIN Khoa k ON k.MaKhoa = ng.MaKhoa
+             WHERE m.MaMon = :ma_mon
+             LIMIT 1'
+        );
+        $q->execute([':ma_mon' => $courseCode]);
+        $row = $q->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        return [
+            'course_code' => trim((string)($row['MaMon'] ?? $courseCode)),
+            'course_name' => trim((string)($row['TenMon'] ?? $courseName)),
+            'credits' => isset($row['SoTinChi']) ? (int)$row['SoTinChi'] : (int)$creditsRaw,
+            'course_type' => self::normalizeCourseType((string)($row['LoaiMon'] ?? $courseType)),
+            'department_code' => trim((string)($row['MaNganh'] ?? $departmentCode)),
+            'department_name' => trim((string)(($row['TenKhoa'] ?? '') !== '' ? $row['TenKhoa'] : ($row['TenNganh'] ?? ''))),
+        ];
+    }
+
+    public static function deleteSubjectByCodeWithPdo(PDO $pdo, string $courseCode): void
+    {
+        self::ensureSchema($pdo);
+        $courseCode = strtoupper(trim($courseCode));
+        if ($courseCode === '') {
+            throw new RuntimeException('Thiếu mã môn học.');
+        }
+
+        $stmt = $pdo->prepare('SELECT COUNT(1) FROM LopHocPhan WHERE MaMon = :ma_mon');
+        $stmt->execute([':ma_mon' => $courseCode]);
+        if ((int)$stmt->fetchColumn() > 0) {
+            throw new RuntimeException('Không thể xóa môn học vì đã có lớp học phần.');
+        }
+
+        $del = $pdo->prepare('DELETE FROM MonHoc WHERE MaMon = :ma_mon');
+        $del->execute([':ma_mon' => $courseCode]);
+        if ($del->rowCount() < 1) {
+            throw new RuntimeException('Không tìm thấy môn học.');
+        }
+    }
+
+    public static function findSubjectByCode(string $courseCode)
+    {
+        self::ensureSchema();
+        $pdo = get_db_connection();
+        $courseCode = strtoupper(trim($courseCode));
+        if ($courseCode === '') return false;
+
+        $stmt = $pdo->prepare(
+            'SELECT
+                m.MaMon,
+                m.TenMon,
+                m.SoTinChi,
+                m.LoaiMon,
+                m.MaNganh,
+                ng.TenNganh,
+                ng.MaKhoa,
+                k.TenKhoa,
+                COUNT(DISTINCT l.MaLHP) AS section_count,
+                COUNT(DISTINCT kq.MaSV) AS student_count
+             FROM MonHoc m
+             LEFT JOIN Nganh ng ON ng.MaNganh = m.MaNganh
+             LEFT JOIN Khoa k ON k.MaKhoa = ng.MaKhoa
+             LEFT JOIN LopHocPhan l ON l.MaMon = m.MaMon
+             LEFT JOIN KetQuaHocTap kq ON kq.MaLHP = l.MaLHP
+             WHERE upper(m.MaMon) = :ma_mon
+             GROUP BY m.MaMon, m.TenMon, m.SoTinChi, m.LoaiMon, m.MaNganh, ng.TenNganh, ng.MaKhoa, k.TenKhoa
+             LIMIT 1'
+        );
+        $stmt->execute([':ma_mon' => $courseCode]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) return false;
+
+        return [
+            'course_code' => trim((string)($row['MaMon'] ?? '')),
+            'course_name' => trim((string)($row['TenMon'] ?? '')),
+            'credits' => isset($row['SoTinChi']) ? (int)$row['SoTinChi'] : null,
+            'course_type' => self::normalizeCourseType((string)($row['LoaiMon'] ?? 'BAT_BUOC')),
+            'department_code' => trim((string)($row['MaNganh'] ?? '')),
+            'department_name' => trim((string)(($row['TenKhoa'] ?? '') !== '' ? $row['TenKhoa'] : ($row['TenNganh'] ?? ''))),
+            'faculty_code' => trim((string)($row['MaKhoa'] ?? '')),
+            'faculty_name' => trim((string)($row['TenKhoa'] ?? '')),
+            'section_count' => (int)($row['section_count'] ?? 0),
+            'student_count' => (int)($row['student_count'] ?? 0),
+        ];
+    }
+
+    public static function updateSubjectByCodeWithPdo(PDO $pdo, string $originalCode, array $data): array
+    {
+        self::ensureSchema($pdo);
+        $originalCode = strtoupper(trim($originalCode));
+        if ($originalCode === '') {
+            throw new RuntimeException('Thiếu mã môn học gốc.');
+        }
+
+        $current = self::findSubjectByCode($originalCode);
+        if (!$current) {
+            throw new RuntimeException('Không tìm thấy môn học.');
+        }
+
+        $newCode = strtoupper(trim((string)($data['course_code'] ?? '')));
+        $newName = trim((string)($data['course_name'] ?? ''));
+        $creditsRaw = trim((string)($data['credits'] ?? ''));
+        $departmentRaw = trim((string)($data['department'] ?? ''));
+        $courseType = self::normalizeCourseType((string)($data['course_type'] ?? ($current['course_type'] ?? 'BAT_BUOC')));
+
+        if ($newCode === '') {
+            throw new RuntimeException('Hãy nhập mã môn học.');
+        }
+        if ($newName === '') {
+            throw new RuntimeException('Hãy nhập tên môn học.');
+        }
+        if ($creditsRaw === '' || !preg_match('/^\d+$/', $creditsRaw) || (int)$creditsRaw <= 0) {
+            throw new RuntimeException('Số tín chỉ phải là số nguyên dương.');
+        }
+
+        $departmentCode = self::resolveNganhCode($pdo, $departmentRaw);
+        if ($departmentRaw !== '' && !$departmentCode) {
+            throw new RuntimeException('Không tìm thấy ngành/khoa quản lý môn học.');
+        }
+
+        if (strcasecmp($originalCode, $newCode) !== 0) {
+            $check = $pdo->prepare('SELECT 1 FROM MonHoc WHERE upper(MaMon) = :ma_mon LIMIT 1');
+            $check->execute([':ma_mon' => $newCode]);
+            if ($check->fetchColumn()) {
+                throw new RuntimeException('Mã môn học mới đã tồn tại.');
+            }
+        }
+
+        $stmt = $pdo->prepare(
+            'UPDATE MonHoc
+             SET MaMon = :new_code,
+                 TenMon = :new_name,
+                 SoTinChi = :credits,
+                 LoaiMon = :loai_mon,
+                 MaNganh = :ma_nganh
+             WHERE upper(MaMon) = :original_code'
+        );
+        $stmt->execute([
+            ':new_code' => $newCode,
+            ':new_name' => $newName,
+            ':credits' => (int)$creditsRaw,
+            ':loai_mon' => $courseType,
+            ':ma_nganh' => $departmentCode,
+            ':original_code' => $originalCode,
+        ]);
+
+        if (strcasecmp($originalCode, $newCode) !== 0) {
+            $moveLhp = $pdo->prepare('UPDATE LopHocPhan SET MaMon = :new_code WHERE upper(MaMon) = :original_code');
+            $moveLhp->execute([
+                ':new_code' => $newCode,
+                ':original_code' => $originalCode,
+            ]);
+        }
+
+        $updated = self::findSubjectByCode($newCode);
+        if (!$updated) {
+            throw new RuntimeException('Không thể đọc lại dữ liệu môn học sau cập nhật.');
+        }
+        return $updated;
     }
 
     public static function listByTeacherCode(string $teacherCode): array
@@ -700,3 +1005,6 @@ class Course
         ];
     }
 }
+
+
+

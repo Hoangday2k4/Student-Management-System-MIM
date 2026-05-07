@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/Faculty.php';
+
 class Teacher
 {
     private static function lowerText(string $value): string
@@ -28,13 +30,8 @@ class Teacher
                 TrangThai TEXT
             )'
         );
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS Nganh (
-                MaNganh TEXT PRIMARY KEY,
-                TenNganh TEXT NOT NULL,
-                MoTa TEXT
-            )'
-        );
+
+        Faculty::ensureSchema($pdo);
 
         $columns = $pdo->query('PRAGMA table_info(GiangVien)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $names = [];
@@ -57,25 +54,9 @@ class Teacher
         }
     }
 
-    private static function resolveNganhIdByName(PDO $pdo, string $department): ?string
+    private static function resolveKhoaIdByName(PDO $pdo, string $department): ?string
     {
-        $name = trim($department);
-        if ($name === '') {
-            return null;
-        }
-        $stmt = $pdo->prepare('SELECT MaNganh FROM Nganh WHERE lower(TenNganh)=lower(:name) OR lower(MaNganh)=lower(:name) LIMIT 1');
-        $stmt->execute([':name' => $name]);
-        $id = $stmt->fetchColumn();
-        if ($id !== false) {
-            return (string)$id;
-        }
-        $code = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $name) ?: 'NGANH');
-        if (strlen($code) > 12) {
-            $code = substr($code, 0, 12);
-        }
-        $ins = $pdo->prepare('INSERT OR IGNORE INTO Nganh (MaNganh, TenNganh, MoTa) VALUES (:code, :name, NULL)');
-        $ins->execute([':code' => $code, ':name' => $name]);
-        return $code;
+        return Faculty::resolveIdByName($pdo, $department);
     }
 
     private static function mapRow(array $row): array
@@ -86,7 +67,9 @@ class Teacher
             'full_name' => $row['HoTen'] ?? '',
             'date_of_birth' => $row['NgaySinh'] ?? '',
             'gender' => $row['GioiTinh'] ?? '',
-            'department' => $row['TenNganh'] ?? '',
+            'academic_title' => $row['HocHamHocVi'] ?? '',
+            'department_code' => $row['MaNganh'] ?? '',
+            'department' => $row['TenKhoa'] ?? '',
             'homeroom_class' => $row['LopPhuTrach'] ?? '',
             'email' => $row['Email'] ?? '',
             'phone' => $row['SoDienThoai'] ?? '',
@@ -99,13 +82,13 @@ class Teacher
     public static function insertWithPdo(PDO $pdo, array $data): int
     {
         self::ensureSchema($pdo);
-        $maNganh = self::resolveNganhIdByName($pdo, (string)($data['department'] ?? ''));
+        $maNganh = self::resolveKhoaIdByName($pdo, (string)($data['department'] ?? ''));
 
         $stmt = $pdo->prepare(
             'INSERT INTO GiangVien (
                 MaGV, HoTen, NgaySinh, GioiTinh, Email, SoDienThoai, HocHamHocVi, TrangThai, MaNganh, LopPhuTrach, Avatar, CreatedAt
             ) VALUES (
-                :ma_gv, :ho_ten, :ngay_sinh, :gioi_tinh, :email, :so_dien_thoai, NULL, :trang_thai, :ma_nganh, :lop_phu_trach, :avatar, CURRENT_TIMESTAMP
+                :ma_gv, :ho_ten, :ngay_sinh, :gioi_tinh, :email, :so_dien_thoai, :hoc_ham_hoc_vi, :trang_thai, :ma_nganh, :lop_phu_trach, :avatar, CURRENT_TIMESTAMP
             )'
         );
         $stmt->execute([
@@ -115,6 +98,7 @@ class Teacher
             ':gioi_tinh' => $data['gender'] ?: null,
             ':email' => $data['email'] ?: (strtolower((string)$data['teacher_code']) . '@local'),
             ':so_dien_thoai' => $data['phone'] ?: null,
+            ':hoc_ham_hoc_vi' => trim((string)($data['academic_title'] ?? '')) ?: null,
             ':trang_thai' => $data['status'] ?: 'Đang công tác',
             ':ma_nganh' => $maNganh,
             ':lop_phu_trach' => $data['homeroom_class'] ?: null,
@@ -128,9 +112,9 @@ class Teacher
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'SELECT g.*, n.TenNganh
+            'SELECT g.*, k.TenKhoa
              FROM GiangVien g
-             LEFT JOIN Nganh n ON n.MaNganh = g.MaNganh
+             LEFT JOIN Khoa k ON k.MaKhoa = g.MaNganh
              WHERE rowid = :id
              LIMIT 1'
         );
@@ -144,9 +128,9 @@ class Teacher
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'SELECT g.*, n.TenNganh
+            'SELECT g.*, k.TenKhoa
              FROM GiangVien g
-             LEFT JOIN Nganh n ON n.MaNganh = g.MaNganh
+             LEFT JOIN Khoa k ON k.MaKhoa = g.MaNganh
              WHERE lower(g.MaGV) = lower(:code)
              LIMIT 1'
         );
@@ -159,9 +143,9 @@ class Teacher
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $sql = 'SELECT g.*, n.TenNganh
+        $sql = 'SELECT g.*, k.TenKhoa
                 FROM GiangVien g
-                LEFT JOIN Nganh n ON n.MaNganh = g.MaNganh
+                LEFT JOIN Khoa k ON k.MaKhoa = g.MaNganh
                 WHERE 1=1';
         $params = [];
 
@@ -169,7 +153,7 @@ class Teacher
             $sql .= ' AND (
                 lower(g.MaGV) LIKE :keyword
                 OR lower(g.HoTen) LIKE :keyword
-                OR lower(IFNULL(n.TenNganh,"")) LIKE :keyword
+                OR lower(IFNULL(k.TenKhoa,"")) LIKE :keyword
                 OR lower(IFNULL(g.LopPhuTrach,"")) LIKE :keyword
                 OR lower(IFNULL(g.Email,"")) LIKE :keyword
                 OR lower(IFNULL(g.SoDienThoai,"")) LIKE :keyword
@@ -177,14 +161,14 @@ class Teacher
             $params[':keyword'] = '%' . self::lowerText((string)$filters['keyword']) . '%';
         }
         if (!empty($filters['department'])) {
-            $sql .= ' AND lower(IFNULL(n.TenNganh,"")) LIKE :department';
+            $sql .= ' AND lower(IFNULL(k.TenKhoa,"")) LIKE :department';
             $params[':department'] = '%' . self::lowerText((string)$filters['department']) . '%';
         }
         if (!empty($filters['status'])) {
             $sql .= ' AND g.TrangThai = :status';
             $params[':status'] = $filters['status'];
         }
-        $sql .= ' ORDER BY lower(IFNULL(n.TenNganh,"")) ASC, g.MaGV ASC LIMIT 300';
+        $sql .= ' ORDER BY lower(IFNULL(k.TenKhoa,"")) ASC, g.MaGV ASC LIMIT 300';
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -195,12 +179,13 @@ class Teacher
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $maNganh = self::resolveNganhIdByName($pdo, (string)($data['department'] ?? ''));
+        $maNganh = self::resolveKhoaIdByName($pdo, (string)($data['department'] ?? ''));
         $stmt = $pdo->prepare(
             'UPDATE GiangVien
              SET HoTen = :ho_ten,
                  NgaySinh = :ngay_sinh,
                  GioiTinh = :gioi_tinh,
+                 HocHamHocVi = :hoc_ham_hoc_vi,
                  MaNganh = :ma_nganh,
                  LopPhuTrach = :lop_phu_trach,
                  Email = :email,
@@ -213,6 +198,7 @@ class Teacher
             ':ho_ten' => $data['full_name'],
             ':ngay_sinh' => $data['date_of_birth'] ?: null,
             ':gioi_tinh' => $data['gender'] ?: null,
+            ':hoc_ham_hoc_vi' => trim((string)($data['academic_title'] ?? '')) ?: null,
             ':ma_nganh' => $maNganh,
             ':lop_phu_trach' => $data['homeroom_class'] ?: null,
             ':email' => $data['email'] ?: null,
@@ -222,5 +208,11 @@ class Teacher
             ':ma_gv' => $teacherCode,
         ]);
         return $stmt->rowCount() > 0;
+    }
+
+    public static function listDepartments(): array
+    {
+        self::ensureSchema();
+        return Faculty::listAll();
     }
 }

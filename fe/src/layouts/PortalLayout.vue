@@ -35,39 +35,40 @@ const resetButtonLabel = computed(() => {
 })
 
 const menuItems = computed(() => {
-  const common = [{ key: 'home', label: 'Hướng dẫn', to: { name: 'home' } }]
+  const common = [{ key: 'home', label: 'Hướng dẫn', desc: 'Tổng quan hệ thống', to: { name: 'home' } }]
 
   if (isStaff.value) {
     return [
       ...common,
-      { key: 'student-create', label: 'Nhập hồ sơ sinh viên', to: { name: 'student-create' } },
-      { key: 'student-search', label: 'Tìm kiếm sinh viên', to: { name: 'student-search' } },
-      { key: 'teacher-create', label: 'Nhập hồ sơ giáo viên', to: { name: 'teacher-create' } },
-      { key: 'teacher-search', label: 'Tìm kiếm giáo viên', to: { name: 'teacher-search' } },
-      { key: 'course-create', label: 'Tạo lớp học', to: { name: 'course-create' } },
-      { key: 'course-manage', label: 'Quản lý môn học', to: { name: 'course-manage' } },
-      { key: 'change-password', label: 'Đổi mật khẩu', to: { name: 'change-password' } },
+      { key: 'faculty-manage', label: 'Quản lý khoa', desc: 'Danh sách các khoa', to: { name: 'faculty-manage' } },
+      { key: 'major-manage', label: 'Quản lý ngành', desc: 'Danh sách các ngành', to: { name: 'major-manage' } },
+      { key: 'class-manage', label: 'Quản lý lớp', desc: 'Danh sách lớp học', to: { name: 'class-manage' } },
+      { key: 'course-manage', label: 'Quản lý môn học', desc: 'Danh sách môn học', to: { name: 'course-manage' } },
+      { key: 'section-manage', label: 'Lớp học phần', desc: 'Danh sách lớp học phần', to: { name: 'section-manage' } },
+      { key: 'student-search', label: 'Quản lý sinh viên', desc: 'Thông tin sinh viên', to: { name: 'student-search' } },
+      { key: 'teacher-search', label: 'Quản lý giảng viên', desc: 'Thông tin giảng viên', to: { name: 'teacher-search' } },
+      { key: 'change-password', label: 'Đổi mật khẩu', desc: 'Bảo mật tài khoản', to: { name: 'change-password' } },
     ]
   }
 
   if (isTeacher.value) {
     return [
       ...common,
-      { key: 'teacher-profile', label: 'Hồ sơ giáo viên', to: { name: 'teacher-profile' } },
-      { key: 'teacher-profile-update', label: 'Cập nhật hồ sơ', to: { name: 'teacher-profile-update' } },
-      { key: 'teacher-course-my', label: 'Môn học giảng dạy', to: { name: 'teacher-course-my' } },
-      { key: 'change-password', label: 'Đổi mật khẩu', to: { name: 'change-password' } },
+      { key: 'teacher-profile', label: 'Hồ sơ giáo viên', desc: 'Thông tin cá nhân', to: { name: 'teacher-profile' } },
+      { key: 'teacher-profile-update', label: 'Cập nhật hồ sơ', desc: 'Chỉnh sửa thông tin', to: { name: 'teacher-profile-update' } },
+      { key: 'teacher-course-my', label: 'Môn học giảng dạy', desc: 'Danh sách môn phân công', to: { name: 'teacher-course-my' } },
+      { key: 'change-password', label: 'Đổi mật khẩu', desc: 'Bảo mật tài khoản', to: { name: 'change-password' } },
     ]
   }
 
   return [
     ...common,
-    { key: 'student-profile', label: 'Hồ sơ sinh viên', to: { name: 'student-profile' } },
-    { key: 'student-profile-update', label: 'Cập nhật hồ sơ', to: { name: 'student-profile-update' } },
-    { key: 'student-course-my', label: 'Các môn đang theo học', to: { name: 'student-course-my' } },
-    { key: 'student-schedule', label: 'Thời khóa biểu', to: { name: 'student-schedule' } },
-    { key: 'student-score-list', label: 'Điểm thi', to: { name: 'student-score-list' } },
-    { key: 'change-password', label: 'Đổi mật khẩu', to: { name: 'change-password' } },
+    { key: 'student-profile', label: 'Hồ sơ sinh viên', desc: 'Thông tin cá nhân', to: { name: 'student-profile' } },
+    { key: 'student-profile-update', label: 'Cập nhật hồ sơ', desc: 'Chỉnh sửa thông tin', to: { name: 'student-profile-update' } },
+    { key: 'student-course-my', label: 'Các môn đang theo học', desc: 'Danh sách học phần', to: { name: 'student-course-my' } },
+    { key: 'student-schedule', label: 'Thời khóa biểu', desc: 'Lịch học cá nhân', to: { name: 'student-schedule' } },
+    { key: 'student-score-list', label: 'Điểm thi', desc: 'Kết quả học tập', to: { name: 'student-score-list' } },
+    { key: 'change-password', label: 'Đổi mật khẩu', desc: 'Bảo mật tài khoản', to: { name: 'change-password' } },
   ]
 })
 
@@ -76,12 +77,30 @@ function isActive(itemKey) {
   if (currentKey === 'course-update') {
     return itemKey === 'course-manage'
   }
+  if (currentKey === 'section-update') {
+    return itemKey === 'section-manage'
+  }
   if (currentKey === 'course-detail') {
     if (isStaff.value) return itemKey === 'course-manage'
     return isTeacher.value ? itemKey === 'teacher-course-my' : itemKey === 'student-course-my'
   }
+  if (currentKey === 'section-detail') {
+    return itemKey === 'section-manage'
+  }
   if (currentKey === 'course-my') {
     return isTeacher.value ? itemKey === 'teacher-course-my' : itemKey === 'student-course-my'
+  }
+  if (currentKey === 'student-create') {
+    return itemKey === 'student-search'
+  }
+  if (currentKey === 'student-admin-edit') {
+    return itemKey === 'student-search'
+  }
+  if (currentKey === 'teacher-create') {
+    return itemKey === 'teacher-search'
+  }
+  if (currentKey === 'teacher-admin-edit') {
+    return itemKey === 'teacher-search'
   }
   return currentKey === itemKey
 }
@@ -184,7 +203,8 @@ async function handleLogout() {
           :class="{ active: isActive(item.key) }"
           @click="router.push(item.to)"
         >
-          {{ item.label }}
+          <span class="menu-item-label">{{ item.label }}</span>
+          <span v-if="item.desc" class="menu-item-desc">{{ item.desc }}</span>
         </button>
       </aside>
 
@@ -286,15 +306,32 @@ async function handleLogout() {
   border: none;
   border-bottom: 1px solid #d9d9d9;
   background: #f8f8f8;
-  padding: 10px 12px;
+  padding: 8px 12px;
   cursor: pointer;
   font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.menu-item-label {
+  line-height: 1.2;
+}
+
+.menu-item-desc {
+  font-size: 11px;
+  color: #5c6e86;
+  line-height: 1.2;
 }
 
 .menu-item.active {
   background: #0f8f54;
   color: #fff;
   font-weight: 700;
+}
+
+.menu-item.active .menu-item-desc {
+  color: #dff5e8;
 }
 
 .menu-item:hover {

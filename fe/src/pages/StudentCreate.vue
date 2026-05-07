@@ -1,7 +1,6 @@
 ﻿<script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { FACULTY_OPTIONS } from '@/constants/options'
 
 const router = useRouter()
 const step = ref('input') // input | confirm | done | bulk-confirm | bulk-done
@@ -18,12 +17,14 @@ const bulkFileName = ref('')
 const form = reactive({
   student_code: '',
   full_name: '',
+  cccd: '',
   date_of_birth: '',
   gender: 'Nam',
-  class_name: '',
-  faculty: FACULTY_OPTIONS[0],
-  email: '',
+  address: '',
   phone: '',
+  email: '',
+  class_name: '',
+  admission_date: '',
   status: 'Đang học',
 })
 
@@ -188,7 +189,10 @@ async function submitForm() {
         student_code: form.student_code.trim(),
         full_name: form.full_name.trim(),
         class_name: form.class_name.trim(),
-        faculty: form.faculty.trim(),
+        cccd: form.cccd.trim(),
+        address: form.address.trim(),
+        admission_date: form.admission_date,
+        faculty: '',
         email: form.email.trim(),
         phone: form.phone.trim(),
       }),
@@ -239,7 +243,7 @@ async function submitForm() {
       <div v-else-if="!canCreate" class="permission-box">
         <h2>Không đủ quyền</h2>
         <p>Chức năng nhập liệu chỉ dành cho tài khoản Admin.</p>
-        <button class="btn-ghost" @click="router.push('/')">Trang chủ</button>
+        <button class="btn-ghost" @click="router.push('/students/search')">Quay lại</button>
       </div>
 
       <form v-else-if="step === 'input'" @submit.prevent="goConfirm">
@@ -256,25 +260,23 @@ async function submitForm() {
             <p v-if="errors.full_name" class="error">{{ errors.full_name }}</p>
           </div>
 
-          <label for="date_of_birth">Ngày sinh</label>
-          <input id="date_of_birth" v-model="form.date_of_birth" type="date" />
-
-          <label for="gender">Giới tính</label>
-          <select id="gender" v-model="form.gender">
-            <option value="Nam">Nam</option>
-            <option value="Nữ">Nữ</option>
-          </select>
-
-          <label for="class_name">Lớp *</label>
-          <div>
-            <input id="class_name" v-model="form.class_name" type="text" maxlength="40" />
-            <p v-if="errors.class_name" class="error">{{ errors.class_name }}</p>
+          <label>CCCD / Ngày sinh</label>
+          <div class="inline-row inline-two">
+            <input id="cccd" v-model="form.cccd" type="text" maxlength="20" placeholder="CCCD" />
+            <input id="date_of_birth" v-model="form.date_of_birth" type="date" />
           </div>
 
-          <label for="faculty">Khoa / Viện</label>
-          <select id="faculty" v-model="form.faculty">
-            <option v-for="faculty in FACULTY_OPTIONS" :key="faculty" :value="faculty">{{ faculty }}</option>
-          </select>
+          <label for="address">Địa chỉ</label>
+          <input id="address" v-model="form.address" type="text" maxlength="255" />
+
+          <label>Giới tính / Số điện thoại</label>
+          <div class="inline-row inline-gender-phone">
+            <select id="gender" v-model="form.gender">
+              <option value="Nam">Nam</option>
+              <option value="Nữ">Nữ</option>
+            </select>
+            <input id="phone" v-model="form.phone" type="text" maxlength="20" placeholder="Số điện thoại" />
+          </div>
 
           <label for="email">Email</label>
           <div>
@@ -282,8 +284,14 @@ async function submitForm() {
             <p v-if="errors.email" class="error">{{ errors.email }}</p>
           </div>
 
-          <label for="phone">Số điện thoại</label>
-          <input id="phone" v-model="form.phone" type="text" maxlength="20" />
+          <label for="class_name">Lớp *</label>
+          <div>
+            <input id="class_name" v-model="form.class_name" type="text" maxlength="40" />
+            <p v-if="errors.class_name" class="error">{{ errors.class_name }}</p>
+          </div>
+
+          <label for="admission_date">Ngày nhập học</label>
+          <input id="admission_date" v-model="form.admission_date" type="date" />
 
           <label for="status">Trạng thái</label>
           <select id="status" v-model="form.status">
@@ -296,14 +304,14 @@ async function submitForm() {
         <p v-if="serverMessage" class="error">{{ serverMessage }}</p>
         <p class="import-hint">
           Cột mặc định file import:
-          <b>MSSV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Lớp</b>, <b>Khoa/Viện</b>, <b>Email</b>, <b>SĐT</b>, <b>Trạng thái</b>.
+          <b>MSSV</b>, <b>Họ tên</b>, <b>CCCD</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Địa chỉ</b>, <b>SĐT</b>, <b>Email</b>, <b>Lớp</b>, <b>Ngày nhập học</b>, <b>Trạng thái</b>.
         </p>
         <div class="actions">
           <button type="submit" class="btn-primary">Xác nhận</button>
           <button type="button" class="btn-file" :disabled="saving" @click="triggerImportFile">
             {{ saving ? 'Đang đọc file...' : 'Thêm file' }}
           </button>
-          <button type="button" class="btn-ghost" @click="router.push('/')">Trang chủ</button>
+          <button type="button" class="btn-ghost" @click="router.push('/students/search')">Quay lại</button>
         </div>
         <input
           ref="fileInputRef"
@@ -319,12 +327,14 @@ async function submitForm() {
         <div class="grid">
           <span class="label">Mã số sinh viên</span><span>{{ form.student_code }}</span>
           <span class="label">Họ tên</span><span>{{ form.full_name }}</span>
+          <span class="label">CCCD</span><span>{{ form.cccd || '-' }}</span>
           <span class="label">Ngày sinh</span><span>{{ form.date_of_birth || '-' }}</span>
           <span class="label">Giới tính</span><span>{{ form.gender }}</span>
-          <span class="label">Lớp</span><span>{{ form.class_name }}</span>
-          <span class="label">Khoa / Viện</span><span>{{ form.faculty }}</span>
-          <span class="label">Email</span><span>{{ form.email || '-' }}</span>
+          <span class="label">Địa chỉ</span><span>{{ form.address || '-' }}</span>
           <span class="label">Số điện thoại</span><span>{{ form.phone || '-' }}</span>
+          <span class="label">Email</span><span>{{ form.email || '-' }}</span>
+          <span class="label">Lớp</span><span>{{ form.class_name }}</span>
+          <span class="label">Ngày nhập học</span><span>{{ form.admission_date || '-' }}</span>
           <span class="label">Trạng thái</span><span>{{ form.status }}</span>
         </div>
         <p v-if="serverMessage" class="error">{{ serverMessage }}</p>
@@ -348,12 +358,14 @@ async function submitForm() {
               <tr>
                 <th>MSSV</th>
                 <th>Họ tên</th>
+                <th>CCCD</th>
                 <th>Ngày sinh</th>
                 <th>Giới tính</th>
-                <th>Lớp</th>
-                <th>Khoa / Viện</th>
-                <th>Email</th>
+                <th>Địa chỉ</th>
                 <th>SĐT</th>
+                <th>Email</th>
+                <th>Lớp</th>
+                <th>Ngày nhập học</th>
                 <th>Trạng thái</th>
               </tr>
             </thead>
@@ -361,12 +373,14 @@ async function submitForm() {
               <tr v-for="row in bulkRows" :key="row.student_code">
                 <td>{{ row.student_code }}</td>
                 <td>{{ row.full_name }}</td>
+                <td>{{ row.cccd || '-' }}</td>
                 <td>{{ row.date_of_birth || '-' }}</td>
                 <td>{{ row.gender || '-' }}</td>
-                <td>{{ row.class_name }}</td>
-                <td>{{ row.faculty || '-' }}</td>
-                <td>{{ row.email || '-' }}</td>
+                <td>{{ row.address || '-' }}</td>
                 <td>{{ row.phone || '-' }}</td>
+                <td>{{ row.email || '-' }}</td>
+                <td>{{ row.class_name }}</td>
+                <td>{{ row.admission_date || '-' }}</td>
                 <td>{{ row.status || '-' }}</td>
               </tr>
             </tbody>
@@ -386,13 +400,30 @@ async function submitForm() {
         <h2>Nhập file thành công</h2>
         <p>Đã thêm <b>{{ bulkResult.inserted_count }}</b> sinh viên vào hệ thống.</p>
         <p v-if="bulkResult.skipped_count > 0">Bỏ qua <b>{{ bulkResult.skipped_count }}</b> dòng bị trùng hoặc không hợp lệ.</p>
+        <div v-if="bulkResult.skipped_count > 0" class="preview-table-wrap">
+          <table class="preview-table">
+            <thead>
+              <tr>
+                <th>Dòng</th>
+                <th>MSSV</th>
+                <th>Lý do bỏ qua</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="item in bulkResult.skipped.slice(0, 30)" :key="`${item.line}-${item.student_code}`">
+                <td>{{ item.line || '-' }}</td>
+                <td>{{ item.student_code || '-' }}</td>
+                <td>{{ item.reason || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p>
           Tất cả tài khoản mới được tạo với mật khẩu mặc định:
           <b>{{ accountInfo.default_password }}</b>
         </p>
         <div class="actions">
-          <button class="btn-primary" @click="router.push('/students/search')">Tìm kiếm sinh viên</button>
-          <button class="btn-ghost" @click="router.push('/')">Trang chủ</button>
+          <button class="btn-primary" @click="router.push('/students/search')">Quay lại</button>
         </div>
       </div>
 
@@ -406,8 +437,8 @@ async function submitForm() {
           <b>{{ accountInfo.default_password }}</b>
         </p>
         <div class="actions">
-          <button class="btn-primary" @click="router.push('/students/search')">Tìm kiếm sinh viên</button>
-          <button class="btn-ghost" @click="router.push('/')">Trang chủ</button>
+          <button class="btn-primary" @click="router.push('/students/search')">Quay lại</button>
+          <button class="btn-ghost" @click="router.push('/students/search')">Quay lại</button>
         </div>
       </div>
     </div>
@@ -472,10 +503,30 @@ select {
   font-size: 14px;
 }
 
+.inline-row {
+  display: grid;
+  gap: 10px;
+}
+
+.inline-two {
+  grid-template-columns: 1fr 1fr;
+}
+
+.inline-gender-phone {
+  grid-template-columns: 160px 1fr;
+}
+
 .actions {
   margin-top: 20px;
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
   gap: 10px;
+}
+
+.import-note {
+  color: #2e4a66;
+  font-size: 13px;
 }
 
 button {
@@ -570,6 +621,11 @@ button {
 
 @media (max-width: 760px) {
   .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .inline-two,
+  .inline-gender-phone {
     grid-template-columns: 1fr;
   }
 }

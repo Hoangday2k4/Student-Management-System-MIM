@@ -5,6 +5,7 @@ import { FACULTY_OPTIONS } from '@/constants/options'
 
 const route = useRoute()
 const router = useRouter()
+const SEMESTER_OPTIONS = ['Kì I', 'Kì II', 'Kì hè']
 
 const step = ref('input')
 const loading = ref(true)
@@ -14,10 +15,13 @@ const saveResult = ref(null)
 
 const form = reactive({
   id: 0,
+  section_code: '',
   course_code: '',
   course_name: '',
   credits: '',
   teacher_code: '',
+  semester: '',
+  academic_year: '',
   department: '',
   schedule: '',
   classroom: '',
@@ -33,6 +37,9 @@ const errors = reactive({
   course_code: '',
   course_name: '',
   teacher_code: '',
+  section_code: '',
+  semester: '',
+  academic_year: '',
   credits: '',
   max_students: '',
   schedule: '',
@@ -54,11 +61,23 @@ const searchQuery = computed(() => {
 })
 
 function goBackToSearch() {
+  if (route.name === 'section-update') {
+    router.push({ path: '/sections/manage', query: searchQuery.value })
+    return
+  }
   router.push({ path: '/courses/manage', query: searchQuery.value })
 }
 
 function asText(value) {
   return String(value ?? '').trim()
+}
+
+function normalizeSemester(value) {
+  const text = asText(value).toLowerCase()
+  if (text === '1' || text === 'i' || text === 'kì i' || text === 'ki i' || text === 'ky i') return 'Kì I'
+  if (text === '2' || text === 'ii' || text === 'kì ii' || text === 'ki ii' || text === 'ky ii') return 'Kì II'
+  if (text === '3' || text === 'kì hè' || text === 'ki he' || text === 'ky he' || text === 'he') return 'Kì hè'
+  return asText(value)
 }
 
 function splitMultiValues(value) {
@@ -72,6 +91,9 @@ function resetErrors() {
   errors.course_code = ''
   errors.course_name = ''
   errors.teacher_code = ''
+  errors.section_code = ''
+  errors.semester = ''
+  errors.academic_year = ''
   errors.credits = ''
   errors.max_students = ''
   errors.schedule = ''
@@ -93,6 +115,18 @@ function validateForm() {
   }
   if (!asText(form.teacher_code)) {
     errors.teacher_code = 'Hãy nhập mã giáo viên.'
+    ok = false
+  }
+  if (asText(form.section_code) && !/^[A-Za-z0-9._-]{3,30}$/.test(asText(form.section_code))) {
+    errors.section_code = 'Mã lớp học phần chỉ gồm chữ/số và . _ -'
+    ok = false
+  }
+  if (form.semester !== '' && !SEMESTER_OPTIONS.includes(asText(form.semester))) {
+    errors.semester = 'Học kỳ chỉ chọn Kì I, Kì II hoặc Kì hè.'
+    ok = false
+  }
+  if (asText(form.academic_year) && !/^\d{4}\s*-\s*\d{4}$/.test(asText(form.academic_year))) {
+    errors.academic_year = 'Năm học đúng dạng 2026-2027.'
     ok = false
   }
   if (form.credits !== '' && (!/^\d+$/.test(form.credits) || Number(form.credits) <= 0)) {
@@ -268,6 +302,10 @@ function backToInput() {
 }
 
 function goBackToDetail() {
+  if (route.name === 'section-update') {
+    router.push({ path: '/sections/detail', query: { id: String(form.id), ...searchQuery.value } })
+    return
+  }
   router.push({ path: '/courses/detail', query: { id: String(form.id), ...searchQuery.value } })
 }
 
@@ -300,10 +338,13 @@ async function loadDetail() {
 
     const data = payload.data || {}
     form.id = data.id || id
+    form.section_code = data.section_code || ''
     form.course_code = data.course_code || ''
     form.course_name = data.course_name || ''
     form.credits = data.credits ?? ''
     form.teacher_code = data.teacher_code || ''
+    form.semester = normalizeSemester(data.semester_label ?? data.semester ?? '')
+    form.academic_year = data.academic_year || ''
     form.department = data.department || ''
     form.schedule = data.schedule || ''
     form.classroom = data.classroom || ''
@@ -326,6 +367,9 @@ async function submitForm() {
     body.append('course_name', asText(form.course_name))
     body.append('credits', asText(form.credits))
     body.append('teacher_code', asText(form.teacher_code))
+    body.append('section_code', asText(form.section_code).toUpperCase())
+    body.append('semester', asText(form.semester))
+    body.append('academic_year', asText(form.academic_year))
     body.append('department', asText(form.department))
     body.append('schedule', asText(form.schedule))
     body.append('classroom', asText(form.classroom))
@@ -351,6 +395,9 @@ async function submitForm() {
       errors.course_code = fields.course_code || ''
       errors.course_name = fields.course_name || ''
       errors.teacher_code = fields.teacher_code || ''
+      errors.section_code = fields.section_code || ''
+      errors.semester = fields.semester || ''
+      errors.academic_year = fields.academic_year || ''
       errors.credits = fields.credits || ''
       errors.max_students = fields.max_students || ''
       errors.schedule = fields.schedule || ''
@@ -375,7 +422,11 @@ async function submitForm() {
       return
     }
 
-    router.push({ path: '/courses/detail', query: { id: String(form.id), ...searchQuery.value } })
+    if (route.name === 'section-update') {
+      router.push({ path: '/sections/detail', query: { id: String(form.id), ...searchQuery.value } })
+    } else {
+      router.push({ path: '/courses/detail', query: { id: String(form.id), ...searchQuery.value } })
+    }
   } catch (error) {
     serverError.value = 'Không kết nối được máy chủ.'
     step.value = 'input'
@@ -393,10 +444,16 @@ async function submitForm() {
       <p v-else-if="serverError && step === 'input'" class="state error">{{ serverError }}</p>
 
       <form v-else-if="step === 'input'" class="grid" @submit.prevent="goConfirm">
-        <label>Mã môn học *</label>
+        <label>Mã LHP / Mã môn *</label>
         <div>
-          <input v-model="form.course_code" type="text" maxlength="30" />
-          <p v-if="errors.course_code" class="error">{{ errors.course_code }}</p>
+          <div class="inline-row two">
+            <input v-model="form.section_code" type="text" maxlength="30" placeholder="Mã lớp học phần" />
+            <input v-model="form.course_code" type="text" maxlength="30" placeholder="Mã môn học" />
+          </div>
+          <div class="inline-row two">
+            <p v-if="errors.section_code" class="error">{{ errors.section_code }}</p>
+            <p v-if="errors.course_code" class="error">{{ errors.course_code }}</p>
+          </div>
         </div>
 
         <label>Tên môn học *</label>
@@ -417,11 +474,28 @@ async function submitForm() {
           <p v-if="errors.teacher_code" class="error">{{ errors.teacher_code }}</p>
         </div>
 
+        <label>Học kỳ / Năm học</label>
+        <div>
+          <div class="inline-row two">
+            <select v-model="form.semester">
+              <option value="">Chọn học kỳ</option>
+              <option v-for="term in SEMESTER_OPTIONS" :key="term" :value="term">{{ term }}</option>
+            </select>
+            <input v-model="form.academic_year" type="text" maxlength="20" placeholder="Ví dụ: 2026-2027" />
+          </div>
+          <div class="inline-row two">
+            <p v-if="errors.semester" class="error">{{ errors.semester }}</p>
+            <p v-if="errors.academic_year" class="error">{{ errors.academic_year }}</p>
+          </div>
+        </div>
+
         <label>Khoa/Bộ môn</label>
-        <select v-model="form.department">
-          <option value="">-- Chọn khoa/bộ môn --</option>
-          <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
-        </select>
+        <div>
+          <select v-model="form.department">
+            <option value="">-- Chọn khoa/bộ môn --</option>
+            <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
+          </select>
+        </div>
 
         <label>Lịch học</label>
         <div>
@@ -445,13 +519,16 @@ async function submitForm() {
         <div>
           <input type="file" accept=".csv,.txt,.xls,.xlsx" @change="onFileChange" />
           <p v-if="fileName">File đã chọn: <b>{{ fileName }}</b></p>
-          <p class="hint">Tải file CSV/XLSX gồm 5 cột: MSSV, Họ tên, Ngày sinh, Giới tính, Lớp. Nếu upload file mới, danh sách lớp sẽ được cập nhật theo file.</p>
+          <p class="hint">
+            Cột mặc định file import:
+            <b>MSSV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Lớp</b>.
+          </p>
         </div>
 
-        <p v-if="serverError" class="error">{{ serverError }}</p>
-        <div class="actions">
+        <p v-if="serverError" class="error full">{{ serverError }}</p>
+        <div class="actions full">
           <button class="btn-primary" type="submit">Xác nhận</button>
-          <button class="btn-ghost" type="button" @click="goBackToSearch">Trở về</button>
+          <button class="btn-ghost" type="button" @click="goBackToSearch">Quay lại</button>
         </div>
       </form>
 
@@ -459,8 +536,11 @@ async function submitForm() {
         <h2>Xác nhận cập nhật</h2>
         <div class="grid">
           <span class="label">Mã môn học</span><span>{{ form.course_code }}</span>
+          <span class="label">Mã lớp học phần</span><span>{{ form.section_code || '-' }}</span>
           <span class="label">Tên môn học</span><span>{{ form.course_name }}</span>
           <span class="label">Số tín chỉ</span><span>{{ form.credits || '-' }}</span>
+          <span class="label">Học kỳ</span><span>{{ form.semester || '-' }}</span>
+          <span class="label">Năm học</span><span>{{ form.academic_year || '-' }}</span>
           <span class="label">Mã giáo viên</span><span>{{ form.teacher_code }}</span>
           <span class="label">Khoa/Bộ môn</span><span>{{ form.department || '-' }}</span>
           <span class="label">Lịch học</span><span>{{ form.schedule || '-' }}</span>
@@ -499,7 +579,7 @@ async function submitForm() {
         <div class="actions">
           <button class="btn-primary" :disabled="submitting" @click="submitForm">{{ submitting ? 'Đang lưu...' : 'Lưu thông tin' }}</button>
           <button class="btn-ghost" @click="backToInput">Hủy</button>
-          <button class="btn-ghost" @click="goBackToSearch">Trở về</button>
+          <button class="btn-ghost" @click="goBackToSearch">Quay lại</button>
         </div>
       </div>
 
@@ -512,8 +592,8 @@ async function submitForm() {
         <p class="hint-line" v-if="saveResult?.missingInDb">Không tồn tại trong hệ thống: <b>{{ saveResult.missingInDb }}</b></p>
         <p class="hint-line" v-if="saveResult?.scheduleConflictRows">Trùng lịch với môn đã học: <b>{{ saveResult.scheduleConflictRows }}</b></p>
         <div class="actions">
-          <button class="btn-primary" @click="goBackToDetail">Quay về</button>
-          <button class="btn-ghost" @click="goBackToSearch">Trở về tìm kiếm</button>
+          <button class="btn-primary" @click="goBackToDetail">Quay lại</button>
+          <button class="btn-ghost" @click="goBackToSearch">Quay lại</button>
         </div>
       </div>
     </div>
@@ -538,11 +618,14 @@ async function submitForm() {
 }
 h1, h2 { color: #007336; margin-top: 0; }
 .grid { display: grid; grid-template-columns: 220px 1fr; gap: 10px 14px; }
+.inline-row { display: grid; gap: 10px; }
+.inline-row.two { grid-template-columns: 1fr 1fr; }
 label { font-weight: 700; padding-top: 10px; }
 input, select { width: 100%; box-sizing: border-box; border: 1px solid #c7d3e2; border-radius: 8px; padding: 10px 12px; }
 .confirm-box { border: 1px solid #d7deea; border-radius: 12px; padding: 16px; background: #f7faff; }
 .label { font-weight: 700; color: #1f3553; }
 .actions { margin-top: 14px; display: flex; gap: 10px; }
+.full { grid-column: 1 / -1; }
 .btn-primary, .btn-ghost { border: none; border-radius: 8px; padding: 10px 16px; cursor: pointer; font-weight: 700; }
 .btn-primary { background: #007336; color: #fff; }
 .btn-ghost { background: #e9eef6; color: #006131; }
@@ -589,6 +672,8 @@ input, select { width: 100%; box-sizing: border-box; border: 1px solid #c7d3e2; 
 }
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
+  .inline-row,
+  .inline-row.two { grid-template-columns: 1fr; }
   label { padding-top: 0; }
 }
 </style>

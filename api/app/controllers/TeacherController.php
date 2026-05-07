@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 require_once __DIR__ . '/../models/Teacher.php';
 require_once __DIR__ . '/../models/Admin.php';
 require_once __DIR__ . '/../helpers/response.php';
@@ -187,6 +187,7 @@ class TeacherController
                 'full_name' => $fullName,
                 'date_of_birth' => trim((string)($payload['date_of_birth'] ?? '')),
                 'gender' => $gender,
+                'academic_title' => trim((string)($payload['academic_title'] ?? '')),
                 'department' => $department,
                 'homeroom_class' => trim((string)($payload['homeroom_class'] ?? '')),
                 'email' => $email,
@@ -396,10 +397,11 @@ class TeacherController
             'full_name' => ['hoten', 'hten', 'fullname', 'tengiaovien'],
             'date_of_birth' => ['ngaysinh', 'dateofbirth', 'dob'],
             'gender' => ['gioitinh', 'gender'],
-            'department' => ['khoa', 'vien', 'khoavien', 'bomon', 'khoabomon', 'department'],
             'email' => ['email'],
-            'homeroom_class' => ['lopphutrach', 'lopchunhiem', 'homeroomclass'],
             'phone' => ['sodienthoai', 'sdt', 'phone'],
+            'academic_title' => ['hocham', 'hochamhocvi', 'academictitle'],
+            'department' => ['khoa', 'manganh', 'department', 'departmentcode', 'vien', 'khoavien', 'bomon', 'khoabomon'],
+            'homeroom_class' => ['lopphutrach', 'lopchunhiem', 'homeroomclass'],
             'status' => ['trangthai', 'status'],
         ];
 
@@ -414,17 +416,18 @@ class TeacherController
             }
         }
 
-        if (count($headers) >= 9) {
+        if (count($headers) >= 10) {
             $defaultMap = [
                 'teacher_code' => 0,
                 'full_name' => 1,
                 'date_of_birth' => 2,
                 'gender' => 3,
-                'department' => 4,
-                'email' => 5,
-                'homeroom_class' => 6,
-                'phone' => 7,
-                'status' => 8,
+                'email' => 4,
+                'phone' => 5,
+                'academic_title' => 6,
+                'department' => 7,
+                'homeroom_class' => 8,
+                'status' => 9,
             ];
             foreach ($defaultMap as $field => $position) {
                 if (!isset($headerMap[$field])) {
@@ -433,9 +436,18 @@ class TeacherController
             }
         }
 
-        foreach (['teacher_code', 'full_name', 'department'] as $requiredField) {
+        $requiredFields = ['teacher_code', 'full_name', 'department'];
+        foreach ($requiredFields as $requiredField) {
             if (!isset($headerMap[$requiredField])) {
-                throw new RuntimeException('File thieu cot bat buoc: ' . $requiredField);
+                $fieldLabel = [
+                    'teacher_code' => 'MSGV',
+                    'full_name' => 'Họ tên',
+                    'department' => 'Khoa (mã ngành)',
+                ][$requiredField] ?? $requiredField;
+                throw new RuntimeException(
+                    'File thiếu cột bắt buộc: ' . $fieldLabel .
+                    '. Cột mặc định file import: MSGV, Họ tên, Ngày sinh, Giới tính, Email, SĐT, Học hàm, Khoa (mã ngành), Lớp phụ trách, Trạng thái.'
+                );
             }
         }
 
@@ -451,22 +463,23 @@ class TeacherController
                 'full_name' => trim((string)($source[$headerMap['full_name']] ?? '')),
                 'date_of_birth' => trim((string)($source[$headerMap['date_of_birth'] ?? -1] ?? '')),
                 'gender' => trim((string)($source[$headerMap['gender'] ?? -1] ?? 'Nam')),
-                'department' => trim((string)($source[$headerMap['department']] ?? '')),
                 'email' => trim((string)($source[$headerMap['email'] ?? -1] ?? '')),
-                'homeroom_class' => trim((string)($source[$headerMap['homeroom_class'] ?? -1] ?? '')),
                 'phone' => trim((string)($source[$headerMap['phone'] ?? -1] ?? '')),
-                'status' => trim((string)($source[$headerMap['status'] ?? -1] ?? 'Dang cong tac')),
+                'academic_title' => trim((string)($source[$headerMap['academic_title'] ?? -1] ?? '')),
+                'department' => trim((string)($source[$headerMap['department']] ?? '')),
+                'homeroom_class' => trim((string)($source[$headerMap['homeroom_class'] ?? -1] ?? '')),
+                'status' => trim((string)($source[$headerMap['status'] ?? -1] ?? 'Đang công tác')),
             ];
 
             if ($row['teacher_code'] === '' && $row['full_name'] === '' && $row['department'] === '') {
                 continue;
             }
             if ($row['teacher_code'] === '' || $row['full_name'] === '' || $row['department'] === '') {
-                $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Thieu truong bat buoc'];
+                $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Thiếu trường bắt buộc'];
                 continue;
             }
             if (isset($seenCodes[$row['teacher_code']])) {
-                $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Trung trong file'];
+                $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Trùng trong file'];
                 continue;
             }
             $seenCodes[$row['teacher_code']] = true;
@@ -488,10 +501,11 @@ class TeacherController
             'full_name' => trim((string)($row['full_name'] ?? '')),
             'date_of_birth' => trim((string)($row['date_of_birth'] ?? '')),
             'gender' => $gender,
-            'department' => trim((string)($row['department'] ?? '')),
             'email' => trim((string)($row['email'] ?? '')),
-            'homeroom_class' => trim((string)($row['homeroom_class'] ?? '')),
             'phone' => trim((string)($row['phone'] ?? '')),
+            'academic_title' => trim((string)($row['academic_title'] ?? '')),
+            'department' => trim((string)($row['department'] ?? '')),
+            'homeroom_class' => trim((string)($row['homeroom_class'] ?? '')),
             'status' => $status,
         ];
     }
@@ -597,6 +611,7 @@ class TeacherController
                     'full_name' => $row['full_name'],
                     'date_of_birth' => $row['date_of_birth'],
                     'gender' => $row['gender'],
+                    'academic_title' => $row['academic_title'],
                     'department' => $row['department'],
                     'homeroom_class' => $row['homeroom_class'],
                     'email' => $row['email'],
@@ -735,6 +750,7 @@ class TeacherController
             'full_name' => $fullName,
             'date_of_birth' => trim((string)($payload['date_of_birth'] ?? ($current['date_of_birth'] ?? ''))),
             'gender' => $gender,
+            'academic_title' => trim((string)($payload['academic_title'] ?? ($current['academic_title'] ?? ''))),
             'department' => $department,
             'homeroom_class' => trim((string)($payload['homeroom_class'] ?? ($current['homeroom_class'] ?? ''))),
             'email' => $email,
@@ -803,6 +819,7 @@ class TeacherController
         $gender = $this->normalizeGender((string)($payload['gender'] ?? ''));
         $status = $this->normalizeStatus((string)($payload['status'] ?? ''));
         $dateOfBirth = trim((string)($payload['date_of_birth'] ?? ''));
+        $academicTitle = trim((string)($payload['academic_title'] ?? ''));
         $homeroomClass = trim((string)($payload['homeroom_class'] ?? ''));
         $phone = trim((string)($payload['phone'] ?? ''));
 
@@ -854,6 +871,7 @@ class TeacherController
                     HoTen = :full_name,
                     NgaySinh = :date_of_birth,
                     GioiTinh = :gender,
+                    HocHamHocVi = :academic_title,
                     LopPhuTrach = :homeroom_class,
                     Email = :email,
                     SoDienThoai = :phone,
@@ -865,6 +883,7 @@ class TeacherController
                 ':full_name' => $fullName,
                 ':date_of_birth' => $dateOfBirth ?: null,
                 ':gender' => $gender,
+                ':academic_title' => $academicTitle ?: null,
                 ':homeroom_class' => $homeroomClass ?: null,
                 ':email' => $email ?: null,
                 ':phone' => $phone ?: null,
@@ -903,7 +922,7 @@ class TeacherController
         }
         $teacherCode = trim((string)($_GET['teacher_code'] ?? ''));
         if ($teacherCode === '') {
-            jsonResponse(['status' => 'error', 'message' => 'Thiếu mã giáo viên.'], 422);
+            jsonResponse(['status' => 'error', 'message' => 'ThiĂ¡ÂºÂ¿u mÄ‚Â£ giÄ‚Â¡o viÄ‚Âªn.'], 422);
             return;
         }
 
@@ -915,7 +934,7 @@ class TeacherController
             $stmt = $pdo->prepare('SELECT 1 FROM GiangVien WHERE MaGV = :code LIMIT 1');
             $stmt->execute([':code' => $teacherCode]);
             if (!$stmt->fetch()) {
-                jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy giáo viên.'], 404);
+                jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y giÄ‚Â¡o viÄ‚Âªn.'], 404);
                 return;
             }
 
@@ -923,7 +942,7 @@ class TeacherController
             $stmt->execute([':code' => $teacherCode]);
             $countCourse = (int)($stmt->fetch()['c'] ?? 0);
             if ($countCourse > 0) {
-                jsonResponse(['status' => 'error', 'message' => 'Giáo viên đang được phân công môn học, không thể xóa.'], 409);
+                jsonResponse(['status' => 'error', 'message' => 'GiÄ‚Â¡o viÄ‚Âªn Ă„â€˜ang Ă„â€˜Ă†Â°Ă¡Â»Â£c phÄ‚Â¢n cÄ‚Â´ng mÄ‚Â´n hĂ¡Â»Âc, khÄ‚Â´ng thĂ¡Â»Æ’ xÄ‚Â³a.'], 409);
                 return;
             }
 
@@ -934,10 +953,12 @@ class TeacherController
             $stmt->execute([':code' => $teacherCode]);
             $pdo->commit();
 
-            jsonResponse(['status' => 'success', 'message' => 'Đã xóa giáo viên và tài khoản liên quan.']);
+            jsonResponse(['status' => 'success', 'message' => 'Ă„ÂÄ‚Â£ xÄ‚Â³a giÄ‚Â¡o viÄ‚Âªn vÄ‚Â  tÄ‚Â i khoĂ¡ÂºÂ£n liÄ‚Âªn quan.']);
         } catch (Throwable $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
-            jsonResponse(['status' => 'error', 'message' => 'Không thể xóa giáo viên.', 'detail' => $e->getMessage()], 500);
+            jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng thĂ¡Â»Æ’ xÄ‚Â³a giÄ‚Â¡o viÄ‚Âªn.', 'detail' => $e->getMessage()], 500);
         }
     }
 }
+
+

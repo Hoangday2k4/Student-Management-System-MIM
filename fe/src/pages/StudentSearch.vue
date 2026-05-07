@@ -1,11 +1,14 @@
-<script setup>
-import { onMounted, reactive, ref } from 'vue'
-import { FACULTY_OPTIONS } from '@/constants/options'
+﻿<script setup>
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
 
 const loading = ref(false)
 const searched = ref(false)
 const students = ref([])
 const errorMessage = ref('')
+const successMessage = ref('')
 const isAdmin = ref(false)
 
 const modalOpen = ref(false)
@@ -16,22 +19,67 @@ const currentStudentCode = ref('')
 
 const filters = reactive({
   keyword: '',
-  class_name: '',
-  faculty: '',
-  status: '',
 })
 
 const editForm = reactive({
   student_code: '',
   full_name: '',
+  cccd: '',
   date_of_birth: '',
   gender: 'Nam',
+  address: '',
+  admission_date: '',
   class_name: '',
-  faculty: '',
   email: '',
   phone: '',
   status: 'Đang học',
 })
+
+const summary = computed(() => {
+  const total = students.value.length
+  let studying = 0
+  let paused = 0
+  let stopped = 0
+
+  for (const student of students.value) {
+    const status = statusLabel(student?.status)
+    if (status === 'Đang học') studying += 1
+    else if (status === 'Bảo lưu' || status === 'Tạm dừng') paused += 1
+    else if (status === 'Đã tốt nghiệp' || status === 'Nghỉ học') stopped += 1
+  }
+
+  return { total, studying, paused, stopped }
+})
+
+function studentBadge(name, code) {
+  const cleanName = String(name || '').trim()
+  const parts = cleanName.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return `${parts[0][0]}${parts[parts.length - 1][0]}`.toUpperCase()
+  if (parts.length === 1 && parts[0].length >= 2) return parts[0].slice(0, 2).toUpperCase()
+  const c = String(code || '').trim()
+  return (c.slice(-2) || 'SV').toUpperCase()
+}
+
+function statusLabel(status) {
+  const s = String(status || '').trim().toLowerCase()
+  if (['đang học', 'dang hoc', 'studying'].includes(s)) return 'Đang học'
+  if (['đã tốt nghiệp', 'da tot nghiep', 'graduated'].includes(s)) return 'Đã tốt nghiệp'
+  if (['bảo lưu', 'bao luu'].includes(s)) return 'Bảo lưu'
+  if (['tạm dừng', 'tam dung', 'suspended'].includes(s)) return 'Tạm dừng'
+  if (['nghỉ học', 'nghi hoc'].includes(s)) return 'Nghỉ học'
+  return status || '-'
+}
+
+function genderLabel(gender) {
+  const s = String(gender || '').trim().toLowerCase()
+  if (['nam', 'male'].includes(s)) return 'Nam'
+  if (['nữ', 'nu', 'female'].includes(s)) return 'Nữ'
+  return gender || '-'
+}
+
+function openCreate() {
+  router.push({ name: 'student-create' })
+}
 
 async function loadIdentity() {
   try {
@@ -47,9 +95,6 @@ async function loadIdentity() {
 function buildQuery() {
   const params = new URLSearchParams()
   if (filters.keyword.trim()) params.append('keyword', filters.keyword.trim())
-  if (filters.class_name.trim()) params.append('class_name', filters.class_name.trim())
-  if (filters.faculty.trim()) params.append('faculty', filters.faculty.trim())
-  if (filters.status.trim()) params.append('status', filters.status.trim())
   return params.toString()
 }
 
@@ -57,12 +102,13 @@ async function doSearch() {
   searched.value = true
   loading.value = true
   errorMessage.value = ''
+  successMessage.value = ''
   try {
     const query = buildQuery()
     const res = await fetch(query ? `/api/students?${query}` : '/api/students')
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
-      errorMessage.value = data.message || data.error || 'Không thể tải dữ liệu tìm kiếm.'
+      errorMessage.value = data.message || data.error || 'Không thể tải dữ liệu sinh viên.'
       students.value = []
       return
     }
@@ -75,21 +121,15 @@ async function doSearch() {
   }
 }
 
-function statusLabel(status) {
-  if (status === 'Đang học' || status === 'Đã tốt nghiệp' || status === 'Tạm dừng') return status
-  if (status === 'studying') return 'Đang học'
-  if (status === 'graduated') return 'Đã tốt nghiệp'
-  if (status === 'suspended') return 'Tạm dừng'
-  return status || '-'
-}
-
 function fillEditForm(student) {
   editForm.student_code = String(student?.student_code || '')
   editForm.full_name = String(student?.full_name || '')
+  editForm.cccd = String(student?.cccd || '')
   editForm.date_of_birth = String(student?.date_of_birth || '')
   editForm.gender = String(student?.gender || 'Nam') || 'Nam'
+  editForm.address = String(student?.address || '')
+  editForm.admission_date = String(student?.admission_date || '')
   editForm.class_name = String(student?.class_name || '')
-  editForm.faculty = String(student?.faculty || '')
   editForm.email = String(student?.email || '')
   editForm.phone = String(student?.phone || '')
   editForm.status = String(student?.status || 'Đang học') || 'Đang học'
@@ -124,10 +164,9 @@ async function openView(student) {
 
 async function openEdit(student) {
   if (!isAdmin.value) return
-  modalMode.value = 'edit'
-  currentStudentCode.value = String(student?.student_code || '')
-  modalOpen.value = true
-  await fetchStudentDetail(currentStudentCode.value)
+  const studentCode = String(student?.student_code || '')
+  if (!studentCode) return
+  router.push({ name: 'student-admin-edit', query: { student_code: studentCode } })
 }
 
 function closeModal() {
@@ -145,8 +184,10 @@ async function saveEdit() {
       full_name: editForm.full_name.trim(),
       date_of_birth: editForm.date_of_birth.trim(),
       gender: editForm.gender,
+      cccd: editForm.cccd.trim(),
+      address: editForm.address.trim(),
+      admission_date: editForm.admission_date.trim(),
       class_name: editForm.class_name.trim(),
-      faculty: editForm.faculty.trim(),
       email: editForm.email.trim(),
       phone: editForm.phone.trim(),
       status: editForm.status,
@@ -162,6 +203,7 @@ async function saveEdit() {
       return
     }
     closeModal()
+    successMessage.value = 'Đã cập nhật thông tin sinh viên.'
     await doSearch()
   } catch (error) {
     modalError.value = 'Không kết nối được máy chủ.'
@@ -183,6 +225,7 @@ async function deleteStudent(student) {
       errorMessage.value = data.message || 'Không thể xóa sinh viên.'
       return
     }
+    successMessage.value = `Đã xóa sinh viên ${studentCode}.`
     await doSearch()
   } catch (error) {
     errorMessage.value = 'Không kết nối được máy chủ.'
@@ -191,76 +234,90 @@ async function deleteStudent(student) {
 
 onMounted(async () => {
   await loadIdentity()
+  await doSearch()
 })
 </script>
 
 <template>
   <div class="page">
     <div class="card">
-      <h1>Tìm kiếm sinh viên</h1>
-
-      <div class="filter-grid">
+      <div class="header-row">
         <div>
-          <label>Từ khóa</label>
-          <input v-model="filters.keyword" type="text" placeholder="MSSV, họ tên, email, số điện thoại..." />
+          <h1>Quản lý sinh viên</h1>
+          <p class="subtitle">Quản lý thông tin sinh viên trong trường.</p>
         </div>
-        <div>
-          <label>Lớp</label>
-          <input v-model="filters.class_name" type="text" placeholder="VD: K69-CLC1" />
-        </div>
-        <div>
-          <label>Khoa / Viện</label>
-          <select v-model="filters.faculty">
-            <option value="">Tất cả</option>
-            <option v-for="faculty in FACULTY_OPTIONS" :key="faculty" :value="faculty">{{ faculty }}</option>
-          </select>
-        </div>
-        <div>
-          <label>Trạng thái</label>
-          <select v-model="filters.status">
-            <option value="">Tất cả</option>
-            <option value="Đang học">Đang học</option>
-            <option value="Đã tốt nghiệp">Đã tốt nghiệp</option>
-            <option value="Tạm dừng">Tạm dừng</option>
-          </select>
-        </div>
+        <button v-if="isAdmin" class="btn-add" type="button" @click="openCreate">+ Thêm sinh viên</button>
       </div>
 
-      <div class="actions">
-        <button class="btn-primary" @click="doSearch">Tra cứu</button>
-        <RouterLink class="btn-ghost" to="/">Trang chủ</RouterLink>
+      <div class="stats-grid">
+        <article class="stat-card stat-total">
+          <div class="stat-label">Tổng sinh viên</div>
+          <div class="stat-value">{{ summary.total }}</div>
+        </article>
+        <article class="stat-card stat-studying">
+          <div class="stat-label">Đang học</div>
+          <div class="stat-value">{{ summary.studying }}</div>
+        </article>
+        <article class="stat-card stat-paused">
+          <div class="stat-label">Bảo lưu/Tạm dừng</div>
+          <div class="stat-value">{{ summary.paused }}</div>
+        </article>
+        <article class="stat-card stat-stopped">
+          <div class="stat-label">Nghỉ/Tốt nghiệp</div>
+          <div class="stat-value">{{ summary.stopped }}</div>
+        </article>
       </div>
 
-      <div v-if="searched" class="result-wrap">
-        <p class="count">Số kết quả: <b>{{ students.length }}</b></p>
+      <div class="toolbar">
+        <input
+          v-model="filters.keyword"
+          type="text"
+          placeholder="Tìm kiếm theo tên hoặc MSSV..."
+          @keyup.enter="doSearch"
+        />
+        <button class="btn-primary" type="button" @click="doSearch">Tra cứu</button>
+      </div>
 
+      <p v-if="successMessage" class="success">{{ successMessage }}</p>
+      <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
+
+      <div class="table-wrap">
         <div v-if="loading" class="state">Đang tải dữ liệu...</div>
-        <div v-else-if="errorMessage" class="state error-state">{{ errorMessage }}</div>
         <div v-else-if="students.length === 0" class="state">Không tìm thấy sinh viên phù hợp.</div>
-
         <div v-else class="table-scroll">
           <table class="result-table">
             <thead>
               <tr>
-                <th>MSSV</th>
-                <th>Họ tên</th>
+                <th>Sinh viên</th>
                 <th>Lớp</th>
-                <th>Khoa/Viện</th>
-                <th>Email</th>
-                <th>SĐT</th>
+                <th>Liên hệ</th>
+                <th>Giới tính</th>
                 <th>Trạng thái</th>
                 <th v-if="isAdmin">Action</th>
               </tr>
             </thead>
             <tbody>
-              <tr v-for="student in students" :key="student.id">
-                <td>{{ student.student_code }}</td>
-                <td>{{ student.full_name }}</td>
-                <td>{{ student.class_name }}</td>
-                <td>{{ student.faculty || '-' }}</td>
-                <td>{{ student.email || '-' }}</td>
-                <td>{{ student.phone || '-' }}</td>
-                <td>{{ statusLabel(student.status) }}</td>
+              <tr v-for="student in students" :key="student.student_code">
+                <td>
+                  <div class="class-info">
+                    <span class="class-badge">{{ studentBadge(student.full_name, student.student_code) }}</span>
+                    <div>
+                      <div class="class-name">{{ student.full_name || '-' }}</div>
+                      <div class="class-sub">MSSV: {{ student.student_code || '-' }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>{{ student.class_name || '-' }}</td>
+                <td>
+                  <div class="main">{{ student.email || '-' }}</div>
+                  <div class="class-sub">{{ student.phone || '-' }}</div>
+                </td>
+                <td>
+                  <span class="gender-chip" :class="{ female: genderLabel(student.gender) === 'Nữ' }">{{ genderLabel(student.gender) }}</span>
+                </td>
+                <td>
+                  <span class="status-chip">{{ statusLabel(student.status) }}</span>
+                </td>
                 <td v-if="isAdmin" class="action-cell">
                   <button type="button" class="icon-btn" title="Xem" @click="openView(student)">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -297,10 +354,12 @@ onMounted(async () => {
           <div v-if="modalMode === 'view'" class="detail-grid">
             <div><b>MSSV:</b> {{ editForm.student_code || '-' }}</div>
             <div><b>Họ tên:</b> {{ editForm.full_name || '-' }}</div>
+            <div><b>CCCD:</b> {{ editForm.cccd || '-' }}</div>
             <div><b>Ngày sinh:</b> {{ editForm.date_of_birth || '-' }}</div>
             <div><b>Giới tính:</b> {{ editForm.gender || '-' }}</div>
+            <div><b>Địa chỉ:</b> {{ editForm.address || '-' }}</div>
             <div><b>Lớp:</b> {{ editForm.class_name || '-' }}</div>
-            <div><b>Khoa/Viện:</b> {{ editForm.faculty || '-' }}</div>
+            <div><b>Ngày nhập học:</b> {{ editForm.admission_date || '-' }}</div>
             <div><b>Email:</b> {{ editForm.email || '-' }}</div>
             <div><b>SĐT:</b> {{ editForm.phone || '-' }}</div>
             <div><b>Trạng thái:</b> {{ statusLabel(editForm.status) }}</div>
@@ -312,35 +371,40 @@ onMounted(async () => {
             <label>Họ tên</label>
             <input v-model="editForm.full_name" type="text" />
 
-            <label>Ngày sinh</label>
-            <input v-model="editForm.date_of_birth" type="date" />
+            <label>CCCD / Ngày sinh</label>
+            <div class="inline-row inline-two">
+              <input v-model="editForm.cccd" type="text" maxlength="20" placeholder="CCCD" />
+              <input v-model="editForm.date_of_birth" type="date" />
+            </div>
 
-            <label>Giới tính</label>
-            <select v-model="editForm.gender">
-              <option value="Nam">Nam</option>
-              <option value="Nữ">Nữ</option>
-            </select>
+            <label>Địa chỉ</label>
+            <input v-model="editForm.address" type="text" maxlength="255" placeholder="Địa chỉ" />
+
+            <label>Giới tính / Số điện thoại</label>
+            <div class="inline-row inline-gender-phone">
+              <select v-model="editForm.gender">
+                <option value="Nam">Nam</option>
+                <option value="Nữ">Nữ</option>
+              </select>
+              <input v-model="editForm.phone" type="text" maxlength="20" placeholder="Số điện thoại" />
+            </div>
 
             <label>Lớp</label>
             <input v-model="editForm.class_name" type="text" />
 
-            <label>Khoa/Viện</label>
-            <select v-model="editForm.faculty">
-              <option value="">-- Chọn khoa/viện --</option>
-              <option v-for="faculty in FACULTY_OPTIONS" :key="faculty" :value="faculty">{{ faculty }}</option>
-            </select>
-
             <label>Email</label>
             <input v-model="editForm.email" type="email" />
 
-            <label>SĐT</label>
-            <input v-model="editForm.phone" type="text" />
+            <label>Ngày nhập học</label>
+            <input v-model="editForm.admission_date" type="date" />
 
             <label>Trạng thái</label>
             <select v-model="editForm.status">
               <option value="Đang học">Đang học</option>
               <option value="Đã tốt nghiệp">Đã tốt nghiệp</option>
+              <option value="Bảo lưu">Bảo lưu</option>
               <option value="Tạm dừng">Tạm dừng</option>
+              <option value="Nghỉ học">Nghỉ học</option>
             </select>
           </div>
         </template>
@@ -354,179 +418,158 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.page {
-  padding: 0;
-  height: 100%;
-}
-
+.page { height: 100%; }
 .card {
-  max-width: 1200px;
+  max-width: 1300px;
   height: 100%;
   min-height: 0;
   margin: 0;
   background: #fff;
   border: 1px solid #cfcfcf;
-  border-radius: 0;
-  box-shadow: none;
   padding: 24px;
   display: flex;
   flex-direction: column;
-}
-
-h1 {
-  margin: 0 0 18px;
-  color: #007336;
-}
-
-.filter-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 14px;
 }
 
-label {
-  display: block;
-  margin-bottom: 6px;
-  font-weight: 600;
-  color: #33435c;
+.header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
 }
+
+h1 { margin: 0; color: #007336; }
+.subtitle { margin: 5px 0 0; color: #2f4565; }
+
+.btn-add {
+  border: none;
+  border-radius: 10px;
+  background: #0f8f54;
+  color: #fff;
+  padding: 10px 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stat-card {
+  border: 1px solid #c7d3e2;
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.stat-total { background: #edf8f0; }
+.stat-studying { background: #eef5ff; }
+.stat-paused { background: #fff7e8; }
+.stat-stopped { background: #fff0f0; }
+
+.stat-label { color: #4a5a72; font-size: 13px; }
+.stat-value { margin-top: 6px; color: #0c274f; font-size: 34px; line-height: 1; font-weight: 800; }
+
+.toolbar { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
 
 input,
 select {
   width: 100%;
   box-sizing: border-box;
-  border: 1px solid #c7d3e2;
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 14px;
-}
-
-.actions {
-  margin-top: 14px;
-  display: flex;
-  gap: 10px;
-  align-items: center;
-}
-
-.btn-primary,
-.btn-ghost {
-  border: none;
-  border-radius: 8px;
-  padding: 10px 16px;
-  font-weight: 600;
-  text-decoration: none;
-  cursor: pointer;
+  border: 1px solid #b7c9df;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 15px;
 }
 
 .btn-primary {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-weight: 700;
+  cursor: pointer;
   background: #007336;
-  color: white;
+  color: #fff;
 }
 
 .btn-ghost {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 20px;
+  font-weight: 700;
+  cursor: pointer;
   background: #e9eef6;
   color: #006131;
 }
 
-.result-wrap {
-  margin-top: 20px;
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+.success,.error { margin: 0; padding: 10px 12px; border-radius: 8px; }
+.success { background: #eefaf2; color: #177144; }
+.error { background: #fdeeee; color: #b72a2a; }
+
+.table-wrap { min-height: 0; display: flex; flex-direction: column; }
+.state { padding: 12px; border-radius: 8px; background: #f4f7fc; color: #607086; }
+.error-state { color: #b72a2a; background: #fdeeee; }
+
+.table-scroll { overflow: auto; min-height: 0; max-height: 430px; }
+.result-table { width: 100%; border-collapse: collapse; }
+.result-table th,.result-table td { border-bottom: 1px solid #e3e9f2; padding: 10px 8px; text-align: left; vertical-align: middle; }
+.result-table th { background: #f0f5fc; color: #0d3362; position: sticky; top: 0; z-index: 2; }
+
+.class-info { display: flex; gap: 10px; align-items: center; }
+.class-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #e51670, #2f72ff);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.class-name { font-weight: 700; font-size: 16px; }
+.class-sub { color: #607086; font-size: 12px; }
+.main { font-weight: 700; font-size: 15px; }
+
+.gender-chip,
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.count {
-  color: #415471;
-}
+.gender-chip { background: #ebf3ff; color: #2651a8; border: 1px solid #c8d9ff; }
+.gender-chip.female { background: #ffeaf3; color: #b43262; border-color: #f4c7dc; }
 
-.state {
-  margin-top: 14px;
-  padding: 12px;
-  border-radius: 8px;
-  background: #f4f7fc;
-  color: #607086;
-}
+.status-chip { background: #e9f9ef; color: #0b7f43; border: 1px solid #b7e5cb; }
 
-.error-state {
-  color: #b72a2a;
-  background: #fdeeee;
-}
-
-.table-scroll {
-  margin-top: 10px;
-  overflow: auto;
-  min-height: 0;
-  flex: 1;
-  max-height: 320px;
-}
-
-.result-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.result-table th,
-.result-table td {
-  border-bottom: 1px solid #e3e9f2;
-  padding: 10px 8px;
-  text-align: left;
-  vertical-align: top;
-}
-
-.result-table th {
-  background: #f0f5fc;
-  color: #2f4565;
-  position: sticky;
-  top: 0;
-  z-index: 2;
-}
-
-.action-cell {
-  white-space: nowrap;
-}
-
+.action-cell { white-space: nowrap; }
 .icon-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   margin-right: 8px;
-  border-radius: 6px;
+  border-radius: 9px;
   border: 1px solid #c7d3e2;
   background: #f8fbff;
+  color: #007336;
+  font-size: 0;
+  line-height: 0;
   cursor: pointer;
 }
-
-.icon-btn svg {
-  width: 16px;
-  height: 16px;
-  display: block;
-  fill: currentColor;
-}
-
-.icon-btn:hover {
-  background: #eaf5ee;
-  border-color: #9ec7ae;
-}
-
-.icon-btn {
-  color: #007336;
-}
-
-.danger-btn svg {
-  fill: currentColor;
-}
-
-.danger-btn {
-  color: #c62020;
-}
-
-.danger-btn:hover {
-  background: #fdeeee;
-  border-color: #e2a2a2;
-}
+.icon-btn svg { width: 16px; height: 16px; display: block; fill: currentColor; pointer-events: none; }
+.icon-btn:hover { background: #eaf5ee; border-color: #9ec7ae; }
+.danger-btn { color: #b72a2a; }
+.danger-btn:hover { background: #fdeeee; border-color: #e1aaaa; color: #962020; }
 
 .modal-backdrop {
   position: fixed;
@@ -535,59 +578,35 @@ select {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 50;
+  z-index: 1000;
 }
 
 .modal-card {
-  width: min(760px, calc(100vw - 24px));
-  max-height: calc(100vh - 24px);
+  width: min(860px, 95vw);
+  max-height: 88vh;
   overflow: auto;
   background: #fff;
-  border-radius: 10px;
-  border: 1px solid #d8e2f1;
+  border: 1px solid #d7deea;
+  border-radius: 12px;
   padding: 18px;
 }
 
-.modal-card h2 {
-  margin: 0 0 10px;
-  color: #007336;
+.modal-card h2 { margin: 0 0 12px; color: #007336; }
+.detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+.edit-grid { display: grid; grid-template-columns: 180px 1fr; gap: 8px 10px; align-items: center; }
+.inline-row { display: grid; gap: 10px; }
+.inline-two { grid-template-columns: 1fr 1fr; }
+.inline-gender-phone { grid-template-columns: 160px 1fr; }
+.modal-actions { margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end; }
+
+@media (max-width: 1080px) {
+  .toolbar { grid-template-columns: 1fr; }
+  .header-row { flex-direction: column; align-items: stretch; }
+  .stats-grid { grid-template-columns: 1fr 1fr; }
 }
 
-.detail-grid {
-  display: grid;
-  gap: 8px;
-}
-
-.edit-grid {
-  display: grid;
-  grid-template-columns: 140px 1fr;
-  gap: 8px 12px;
-  align-items: center;
-}
-
-.edit-grid label {
-  margin: 0;
-}
-
-.modal-actions {
-  margin-top: 14px;
-  display: flex;
-  gap: 8px;
-}
-
-@media (max-width: 980px) {
-  .filter-grid {
-    grid-template-columns: 1fr 1fr;
-  }
-}
-
-@media (max-width: 650px) {
-  .filter-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .edit-grid {
-    grid-template-columns: 1fr;
-  }
+@media (max-width: 760px) {
+  .stats-grid { grid-template-columns: 1fr; }
+  .detail-grid, .edit-grid { grid-template-columns: 1fr; }
 }
 </style>
