@@ -1,12 +1,31 @@
 ﻿<?php
 require_once __DIR__ . '/../models/Course.php';
+require_once __DIR__ . '/../models/Semester.php';
 require_once __DIR__ . '/../models/Teacher.php';
 require_once __DIR__ . '/../models/Student.php';
 require_once __DIR__ . '/../models/Admin.php';
+require_once __DIR__ . '/../models/Attendance.php';
 require_once __DIR__ . '/../helpers/response.php';
 
 class CourseController
 {
+    private function resolveCurrentSemesterCode(?PDO $pdo = null): string
+    {
+        try {
+            if (!$pdo) {
+                $pdo = get_db_connection();
+            }
+            $stmt = $pdo->query('SELECT MaHocKy FROM HocKy WHERE IsCurrent = 1 AND TrangThai = "ACTIVE" ORDER BY UpdatedAt DESC, CreatedAt DESC LIMIT 1');
+            $code = $stmt ? $stmt->fetchColumn() : false;
+            if ($code !== false && trim((string)$code) !== '') {
+                return trim((string)$code);
+            }
+        } catch (Throwable $e) {
+            return '';
+        }
+        return '';
+    }
+
     private function currentIdentity(): ?array
     {
         if (session_status() === PHP_SESSION_NONE) {
@@ -42,6 +61,25 @@ class CourseController
         }
         $payload = json_decode($raw, true);
         return is_array($payload) ? $payload : null;
+    }
+
+    private function normalizeSessionDate(string $value): string
+    {
+        $raw = trim($value);
+        if ($raw === '') return '';
+        $dt = DateTime::createFromFormat('Y-m-d', $raw);
+        if (!$dt) return '';
+        if ($dt->format('Y-m-d') !== $raw) return '';
+        return $raw;
+    }
+
+    private function normalizeAttendanceStatus(string $value): string
+    {
+        $raw = strtoupper(trim($value));
+        if ($raw === 'PRESENT' || $raw === 'ABSENT') {
+            return $raw;
+        }
+        return '';
     }
 
     private function splitMultiValues(string $raw): array
@@ -109,7 +147,7 @@ class CourseController
             return null;
         }
 
-        $rows = Course::searchForStaff([]);
+        $rows = Course::searchForStaff([], $pdo);
         if ($excludeCourseId !== null && $excludeCourseId > 0) {
             $rows = array_values(array_filter($rows, static function ($row) use ($excludeCourseId) {
                 return (int)($row['id'] ?? 0) !== $excludeCourseId;
@@ -189,6 +227,68 @@ class CourseController
         }
 
         return [$allowed, array_values($conflictMap), count($conflictMap)];
+    }
+
+    private function runWithDbRetry(callable $handler, int $maxAttempts = 3, int $baseDelayMs = 200)
+    {
+        $attempt = 0;
+        while (true) {
+            $attempt++;
+            try {
+                return $handler();
+            } catch (PDOException $e) {
+                $msg = (string)$e->getMessage();
+                $isLocked = stripos($msg, 'database is locked') !== false;
+                if ($isLocked && $attempt < $maxAttempts) {
+                    usleep($baseDelayMs * 1000 * $attempt);
+                    continue;
+                }
+                throw $e;
+            }
+        }
+    }
+
+    private function composeAttendancePayload(PDO $pdo, int $courseId, array $course, int $sessionId): array
+    {
+        $maLHP = Attendance::resolveMaLhpByCourseId($pdo, $courseId);
+        $sessions = $maLHP ? Attendance::listSessionsByCourse($pdo, $maLHP) : [];
+
+        $selected = null;
+        if ($sessionId > 0) {
+            $selected = Attendance::getSessionById($pdo, $sessionId);
+        }
+        if (!$selected && !empty($sessions)) {
+            $selected = Attendance::getSessionById($pdo, (int)($sessions[0]['id'] ?? 0));
+        }
+        if ($selected && $maLHP && (string)($selected['ma_lhp'] ?? '') !== $maLHP) {
+            $selected = null;
+        }
+
+        $attendance = $selected ? Attendance::getAttendanceMap($pdo, (int)$selected['id']) : [];
+        $students = Course::getStudentsByCourseId($courseId);
+
+        return [
+            'status' => 'success',
+            'data' => [
+                'id' => (int)($course['id'] ?? $courseId),
+                'course_code' => $course['course_code'] ?? '',
+                'course_name' => $course['course_name'] ?? '',
+                'teacher_name' => $course['teacher_name'] ?? '',
+                'teacher_code' => $course['teacher_code'] ?? '',
+                'credits' => $course['credits'] ?? null,
+                'schedule' => $course['schedule'] ?? '',
+                'classroom' => $course['classroom'] ?? '',
+                'ma_hoc_ky' => $course['ma_hoc_ky'] ?? '',
+            ],
+            'session' => $selected ? [
+                'id' => (int)$selected['id'],
+                'date' => (string)($selected['session_date'] ?? ''),
+                'note' => (string)($selected['note'] ?? ''),
+            ] : null,
+            'sessions' => $sessions,
+            'students' => $students,
+            'attendance' => $attendance,
+        ];
     }
     private function extractStudentCodesFromTableRows(array $rows): array
     {
@@ -336,7 +436,7 @@ class CourseController
         $rows = [];
         $handle = fopen($filePath, 'rb');
         if (!$handle) return $rows;
-        while (($data = fgetcsv($handle)) !== false) {
+        while (($data = fgetcsv($handle, 0, ',', '"', '')) !== false) {
             $row = [];
             foreach ($data as $cell) {
                 $row[] = trim((string)$cell);
@@ -477,7 +577,6 @@ class CourseController
             'course_name' => ['tenmonhoc', 'coursename'],
             'credits' => ['sotinchi', 'credits'],
             'teacher_code' => ['msgv', 'magiaovien', 'mgv', 'teachercode'],
-            'department' => ['khoa', 'vien', 'khoavien', 'bomon', 'khoabomon', 'department'],
             'schedule' => ['lichhoc', 'schedule'],
             'classroom' => ['phonghoc', 'classroom'],
             'max_students' => ['soluongtoida', 'maxstudents'],
@@ -494,17 +593,50 @@ class CourseController
             }
         }
 
-        if (count($headers) >= 8) {
-            $defaultMap = [
-                'course_code' => 0,
-                'course_name' => 1,
-                'credits' => 2,
-                'teacher_code' => 3,
-                'department' => 4,
-                'schedule' => 5,
-                'classroom' => 6,
-                'max_students' => 7,
-            ];
+        if (count($headers) >= 6) {
+            $col3 = $this->normalizeHeader((string)($headers[3] ?? ''));
+            $col4 = $this->normalizeHeader((string)($headers[4] ?? ''));
+            $looksLikeOldDepartmentColumn = in_array($col4, ['khoa', 'vien', 'khoavien', 'bomon', 'khoabomon', 'department'], true);
+            $looksLikeTeacherColumn = in_array($col3, ['msgv', 'magiaovien', 'mgv', 'teachercode'], true);
+            $looksLikeDepartmentAtCol3 = in_array($col3, ['khoa', 'vien', 'khoavien', 'bomon', 'khoabomon', 'department'], true);
+
+            $defaultMap = ($looksLikeOldDepartmentColumn && count($headers) >= 8)
+                ? [
+                    'course_code' => 0,
+                    'course_name' => 1,
+                    'credits' => 2,
+                    'teacher_code' => 3,
+                    'schedule' => 5,
+                    'classroom' => 6,
+                    'max_students' => 7,
+                ]
+                : (($looksLikeDepartmentAtCol3 && count($headers) >= 7)
+                    ? [
+                        'course_code' => 0,
+                        'course_name' => 1,
+                        'credits' => 2,
+                        'schedule' => 4,
+                        'classroom' => 5,
+                        'max_students' => 6,
+                    ]
+                    : ($looksLikeTeacherColumn || count($headers) >= 7
+                        ? [
+                            'course_code' => 0,
+                            'course_name' => 1,
+                            'credits' => 2,
+                            'teacher_code' => 3,
+                            'schedule' => 4,
+                            'classroom' => 5,
+                            'max_students' => 6,
+                        ]
+                        : [
+                            'course_code' => 0,
+                            'course_name' => 1,
+                            'credits' => 2,
+                            'schedule' => 3,
+                            'classroom' => 4,
+                            'max_students' => 5,
+                        ]));
             foreach ($defaultMap as $field => $position) {
                 if (!isset($headerMap[$field])) {
                     $headerMap[$field] = $position;
@@ -512,7 +644,7 @@ class CourseController
             }
         }
 
-        foreach (['course_code', 'course_name', 'teacher_code'] as $requiredField) {
+        foreach (['course_code', 'course_name'] as $requiredField) {
             if (!isset($headerMap[$requiredField])) {
                 throw new RuntimeException('File thieu cot bat buoc: ' . $requiredField);
             }
@@ -524,21 +656,21 @@ class CourseController
         for ($i = 1; $i < count($rawRows); $i++) {
             $line = $i + 1;
             $source = $rawRows[$i];
+            $teacherIndex = isset($headerMap['teacher_code']) ? (int)$headerMap['teacher_code'] : -1;
             $row = [
                 'course_code' => trim((string)($source[$headerMap['course_code']] ?? '')),
                 'course_name' => trim((string)($source[$headerMap['course_name']] ?? '')),
                 'credits' => trim((string)($source[$headerMap['credits'] ?? -1] ?? '')),
-                'teacher_code' => trim((string)($source[$headerMap['teacher_code']] ?? '')),
-                'department' => trim((string)($source[$headerMap['department'] ?? -1] ?? '')),
+                'teacher_code' => trim((string)($source[$teacherIndex] ?? '')),
                 'schedule' => trim((string)($source[$headerMap['schedule'] ?? -1] ?? '')),
                 'classroom' => trim((string)($source[$headerMap['classroom'] ?? -1] ?? '')),
                 'max_students' => trim((string)($source[$headerMap['max_students'] ?? -1] ?? '')),
             ];
 
-            if ($row['course_code'] === '' && $row['course_name'] === '' && $row['teacher_code'] === '') {
+            if ($row['course_code'] === '' && $row['course_name'] === '') {
                 continue;
             }
-            if ($row['course_code'] === '' || $row['course_name'] === '' || $row['teacher_code'] === '') {
+            if ($row['course_code'] === '' || $row['course_name'] === '') {
                 $skipped[] = ['line' => $line, 'course_code' => $row['course_code'], 'reason' => 'Thieu truong bat buoc'];
                 continue;
             }
@@ -559,9 +691,13 @@ class CourseController
         $courseCode = trim((string)($payload['course_code'] ?? ''));
         $courseName = trim((string)($payload['course_name'] ?? ''));
         $teacherCode = trim((string)($payload['teacher_code'] ?? ''));
-        $department = trim((string)($payload['department'] ?? ''));
         $schedule = strtoupper(trim((string)($payload['schedule'] ?? '')));
         $classroom = strtoupper(trim((string)($payload['classroom'] ?? '')));
+        $maHocKy = trim((string)($payload['ma_hoc_ky'] ?? ''));
+        if ($maHocKy === '' && $pdo) {
+            $maHocKy = $this->resolveCurrentSemesterCode($pdo);
+        }
+        $enrollmentStatus = strtoupper(trim((string)($payload['enrollment_status'] ?? 'DRAFT')));
 
         $creditsRaw = trim((string)($payload['credits'] ?? ''));
         $maxStudentsRaw = trim((string)($payload['max_students'] ?? ''));
@@ -569,7 +705,10 @@ class CourseController
         $errors = [];
         if ($courseCode === '') $errors['course_code'] = 'HĂ£y nháº­p mĂ£ mĂ´n há»c.';
         if ($courseName === '') $errors['course_name'] = 'HĂ£y nháº­p tĂªn mĂ´n há»c.';
-        if ($teacherCode === '') $errors['teacher_code'] = 'HĂ£y nháº­p mĂ£ giĂ¡o viĂªn.';
+        if ($maHocKy === '') $errors['ma_hoc_ky'] = 'Hay chon hoc ky.';
+        if (!in_array($enrollmentStatus, ['DRAFT', 'OPEN', 'CLOSED', 'LOCKED'], true)) {
+            $errors['enrollment_status'] = 'Trang thai dang ky khong hop le.';
+        }
 
         $credits = null;
         if ($creditsRaw !== '') {
@@ -580,6 +719,25 @@ class CourseController
                 if ($credits <= 0) {
                     $errors['credits'] = 'Sá»‘ tĂ­n chá»‰ pháº£i lá»›n hÆ¡n 0.';
                 }
+            }
+        }
+
+        if ($maHocKy !== '') {
+            try {
+                if ($pdo) {
+                    $stmt = $pdo->prepare('SELECT 1 FROM HocKy WHERE lower(MaHocKy)=lower(:ma) LIMIT 1');
+                    $stmt->execute([':ma' => $maHocKy]);
+                    if (!$stmt->fetchColumn()) {
+                        $errors['ma_hoc_ky'] = 'Khong tim thay hoc ky.';
+                    }
+                } else {
+                    $semester = Semester::findByCode($maHocKy);
+                    if (!$semester) {
+                        $errors['ma_hoc_ky'] = 'Khong tim thay hoc ky.';
+                    }
+                }
+            } catch (Throwable $e) {
+                $errors['ma_hoc_ky'] = 'Khong the kiem tra hoc ky luc nay.';
             }
         }
 
@@ -654,10 +812,12 @@ class CourseController
             'course_name' => $courseName,
             'credits' => $credits,
             'teacher_code' => $teacherCode,
-            'department' => $department,
+            'department' => '',
             'schedule' => $schedule,
             'classroom' => $classroom,
             'max_students' => $maxStudents,
+            'ma_hoc_ky' => $maHocKy,
+            'enrollment_status' => $enrollmentStatus,
             'teacher_name' => $teacher['full_name'] ?? '',
         ], $errors];
     }
@@ -700,6 +860,21 @@ class CourseController
         return 'F';
     }
 
+    private function canTransitEnrollmentStatus(string $from, string $to): bool
+    {
+        $from = strtoupper(trim($from));
+        $to = strtoupper(trim($to));
+        if ($from === $to) return true;
+
+        $allowed = [
+            'DRAFT' => ['OPEN', 'CLOSED', 'LOCKED'],
+            'OPEN' => ['CLOSED', 'LOCKED'],
+            'CLOSED' => ['OPEN', 'LOCKED'],
+            'LOCKED' => [],
+        ];
+        return in_array($to, $allowed[$from] ?? [], true);
+    }
+
     public function index()
     {
         $identity = $this->currentIdentity();
@@ -715,20 +890,24 @@ class CourseController
         if ($this->isStaff($identity)) {
             $rows = Course::searchForStaff([
                 'keyword' => isset($_GET['keyword']) ? trim((string)$_GET['keyword']) : '',
-                'department' => isset($_GET['department']) ? trim((string)$_GET['department']) : '',
                 'teacher_code' => isset($_GET['teacher_code']) ? trim((string)$_GET['teacher_code']) : '',
+                'ma_hoc_ky' => isset($_GET['ma_hoc_ky']) ? trim((string)$_GET['ma_hoc_ky']) : '',
             ]);
             jsonResponse($rows);
             return;
         }
 
         if ($this->isTeacher($identity)) {
-            jsonResponse(Course::listByTeacherCode($loginId));
+            jsonResponse(Course::listByTeacherCode($loginId, [
+                'ma_hoc_ky' => isset($_GET['ma_hoc_ky']) ? trim((string)$_GET['ma_hoc_ky']) : '',
+            ]));
             return;
         }
 
         if ($this->isStudent($identity)) {
-            jsonResponse(Course::listByStudentCode($loginId));
+            jsonResponse(Course::listByStudentCode($loginId, [
+                'ma_hoc_ky' => isset($_GET['ma_hoc_ky']) ? trim((string)$_GET['ma_hoc_ky']) : '',
+            ]));
             return;
         }
 
@@ -912,76 +1091,95 @@ class CourseController
         }
 
         try {
-            $pdo = get_db_connection();
-            Course::ensureSchema($pdo);
-            Teacher::ensureSchema($pdo);
-            Student::ensureSchema($pdo);
-            $pdo->beginTransaction();
+            $result = $this->runWithDbRetry(function () use ($rows) {
+                $pdo = get_db_connection();
+                Course::ensureSchema($pdo);
+                Teacher::ensureSchema($pdo);
+                Student::ensureSchema($pdo);
 
-            $inserted = 0;
-            $skipped = [];
-            $existingCodes = [];
-            $courseCodes = $pdo->query('SELECT MaMon FROM MonHoc')->fetchAll(PDO::FETCH_COLUMN);
-            foreach ($courseCodes as $code) {
-                $existingCodes[strtolower(trim((string)$code))] = true;
-            }
+                try {
+                    $pdo->beginTransaction();
 
-            foreach ($rows as $idx => $row) {
-                $line = $idx + 2;
-                $data = is_array($row) ? $row : [];
-                [$validated, $errors] = $this->validatePayload($data, $pdo);
-                $code = trim((string)($validated['course_code'] ?? ''));
-                $codeKey = strtolower($code);
+                    $inserted = 0;
+                    $skipped = [];
+                    $existingCodes = [];
+                    $courseCodes = $pdo->query('SELECT MaMon FROM MonHoc')->fetchAll(PDO::FETCH_COLUMN);
+                    foreach ($courseCodes as $code) {
+                        $existingCodes[strtolower(trim((string)$code))] = true;
+                    }
 
-                if (!empty($errors)) {
-                    $skipped[] = ['line' => $line, 'course_code' => $code, 'reason' => implode(' | ', array_values($errors))];
-                    continue;
-                }
-                if (isset($existingCodes[$codeKey])) {
-                    $skipped[] = ['line' => $line, 'course_code' => $code, 'reason' => 'Mã môn học đã tồn tại'];
-                    continue;
-                }
+                    foreach ($rows as $idx => $row) {
+                        $line = $idx + 2;
+                        $data = is_array($row) ? $row : [];
+                        [$validated, $errors] = $this->validatePayload($data, $pdo);
+                        $code = trim((string)($validated['course_code'] ?? ''));
+                        $codeKey = strtolower($code);
 
-                $roomConflict = $this->findClassroomConflict(
-                    $pdo,
-                    (string)($validated['schedule'] ?? ''),
-                    (string)($validated['classroom'] ?? ''),
-                    null
-                );
-                if ($roomConflict) {
-                    $skipped[] = [
-                        'line' => $line,
-                        'course_code' => $code,
-                        'reason' => sprintf(
-                            'Trùng phòng học với lớp %s (T%s-(%s-%s), phòng %s)',
-                            $roomConflict['course_code'],
-                            $roomConflict['day'],
-                            $roomConflict['start'],
-                            $roomConflict['end'],
-                            $roomConflict['classroom']
-                        ),
+                        if (!empty($errors)) {
+                            $skipped[] = ['line' => $line, 'course_code' => $code, 'reason' => implode(' | ', array_values($errors))];
+                            continue;
+                        }
+                        if (isset($existingCodes[$codeKey])) {
+                            $skipped[] = ['line' => $line, 'course_code' => $code, 'reason' => 'Mã môn học đã tồn tại'];
+                            continue;
+                        }
+
+                        $roomConflict = $this->findClassroomConflict(
+                            $pdo,
+                            (string)($validated['schedule'] ?? ''),
+                            (string)($validated['classroom'] ?? ''),
+                            null
+                        );
+                        if ($roomConflict) {
+                            $skipped[] = [
+                                'line' => $line,
+                                'course_code' => $code,
+                                'reason' => sprintf(
+                                    'Trùng phòng học với lớp %s (T%s-(%s-%s), phòng %s)',
+                                    $roomConflict['course_code'],
+                                    $roomConflict['day'],
+                                    $roomConflict['start'],
+                                    $roomConflict['end'],
+                                    $roomConflict['classroom']
+                                ),
+                            ];
+                            continue;
+                        }
+
+                        Course::insertWithPdo($pdo, $validated);
+                        $existingCodes[$codeKey] = true;
+                        $inserted++;
+                    }
+
+                    $pdo->commit();
+
+                    return [
+                        'inserted' => $inserted,
+                        'skipped' => $skipped,
                     ];
-                    continue;
+                } catch (PDOException $e) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $e;
+                } catch (Throwable $e) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $e;
                 }
+            });
 
-                Course::insertWithPdo($pdo, $validated);
-                $existingCodes[$codeKey] = true;
-                $inserted++;
-            }
-
-            $pdo->commit();
             jsonResponse([
                 'status' => 'success',
-                'inserted_count' => $inserted,
-                'skipped_count' => count($skipped),
-                'skipped' => $skipped,
+                'inserted_count' => (int)($result['inserted'] ?? 0),
+                'skipped_count' => count($result['skipped'] ?? []),
+                'skipped' => $result['skipped'] ?? [],
             ]);
         } catch (PDOException $e) {
-            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
             $msg = (string)$e->getMessage();
             jsonResponse(['status' => 'error', 'message' => 'Không thể import lớp học.', 'detail' => $msg], 500);
         } catch (Throwable $e) {
-            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
             jsonResponse(['status' => 'error', 'message' => 'Loi he thong.', 'detail' => $e->getMessage()], 500);
         }
     }
@@ -1029,6 +1227,132 @@ class CourseController
             'data' => $course,
             'students' => $students,
         ]);
+    }
+
+    public function addStudents()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+        if (!$this->isStaff($identity)) {
+            jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
+            return;
+        }
+
+        Teacher::ensureSchema();
+        Student::ensureSchema();
+        Course::ensureSchema();
+
+        $payload = $this->parseJsonPayload();
+        if (!is_array($payload)) {
+            jsonResponse(['status' => 'error', 'message' => 'Du lieu khong hop le.'], 400);
+            return;
+        }
+
+        $courseId = (int)($payload['id'] ?? 0);
+        $studentCodes = is_array($payload['student_codes'] ?? null) ? $payload['student_codes'] : [];
+        $studentCodes = array_values(array_unique(array_filter(array_map(static fn($v) => trim((string)$v), $studentCodes))));
+
+        if ($courseId <= 0) {
+            jsonResponse(['status' => 'error', 'message' => 'Thieu ma lop hoc.'], 422);
+            return;
+        }
+        if (empty($studentCodes)) {
+            jsonResponse(['status' => 'error', 'message' => 'Hay chon it nhat mot sinh vien.'], 422);
+            return;
+        }
+
+        $course = Course::findById($courseId);
+        if (!$course) {
+            jsonResponse(['status' => 'error', 'message' => 'Khong tim thay mon hoc.'], 404);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            Course::ensureSchema($pdo);
+            Student::ensureSchema($pdo);
+
+            $validCodes = Course::findValidStudentCodes($pdo, $studentCodes);
+            $requestedMap = array_fill_keys(array_map('strtolower', $studentCodes), true);
+            $validMap = array_fill_keys(array_map(static fn($v) => strtolower((string)$v), $validCodes), true);
+
+            $missingCodes = [];
+            foreach ($studentCodes as $code) {
+                if (!isset($validMap[strtolower($code)])) {
+                    $missingCodes[] = $code;
+                }
+            }
+
+            $currentStudents = Course::getStudentsByCourseId($courseId);
+            $currentMap = [];
+            foreach ($currentStudents as $student) {
+                $code = strtolower(trim((string)($student['student_code'] ?? '')));
+                if ($code !== '') {
+                    $currentMap[$code] = true;
+                }
+            }
+
+            $newCodes = [];
+            $alreadyEnrolled = [];
+            foreach ($validCodes as $code) {
+                $key = strtolower(trim((string)$code));
+                if (isset($currentMap[$key])) {
+                    $alreadyEnrolled[] = $code;
+                    continue;
+                }
+                $newCodes[] = $code;
+            }
+
+            [$newCodes, $scheduleConflictDetails, $scheduleConflictRows] = $this->splitStudentsByScheduleConflict(
+                $pdo,
+                $courseId,
+                $newCodes,
+                (string)($course['schedule'] ?? '')
+            );
+
+            $mergedCount = count($currentMap) + count($newCodes);
+            $maxStudents = isset($course['max_students']) ? (int)$course['max_students'] : 0;
+            if ($maxStudents > 0 && $mergedCount > $maxStudents) {
+                jsonResponse([
+                    'status' => 'error',
+                    'message' => 'Vuot qua so luong toi da cua lop hoc phan.',
+                ], 422);
+                return;
+            }
+
+            $addedCount = 0;
+            if (!empty($newCodes)) {
+                $pdo->beginTransaction();
+                $addedCount = Course::appendEnrollmentsWithPdo($pdo, $courseId, $newCodes);
+                $pdo->commit();
+            }
+
+            $updatedCourse = Course::findById($courseId);
+            $updatedStudents = Course::getStudentsByCourseId($courseId);
+
+            jsonResponse([
+                'status' => 'success',
+                'message' => 'Da cap nhat danh sach sinh vien cho mon hoc.',
+                'data' => $updatedCourse,
+                'students' => $updatedStudents,
+                'summary' => [
+                    'requested' => count($studentCodes),
+                    'added' => $addedCount,
+                    'already_enrolled' => count($alreadyEnrolled),
+                    'missing_in_db' => count($missingCodes),
+                    'schedule_conflict_rows' => $scheduleConflictRows,
+                    'schedule_conflict_students' => array_slice($scheduleConflictDetails, 0, 20),
+                ],
+            ]);
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            jsonResponse(['status' => 'error', 'message' => 'Khong the them sinh vien vao mon hoc.', 'detail' => $e->getMessage()], 500);
+        }
     }
 
     public function update()
@@ -1090,6 +1414,21 @@ class CourseController
             if (!empty($errors)) {
                 jsonResponse(['status' => 'error', 'message' => 'Dá»¯ liá»‡u khĂ´ng há»£p lá»‡.', 'fields' => $errors], 422);
                 return;
+            }
+
+            $currentSemester = trim((string)($current['ma_hoc_ky'] ?? ''));
+            $newSemester = trim((string)($data['ma_hoc_ky'] ?? ''));
+            if ($currentSemester !== '' && $newSemester !== '' && strcasecmp($currentSemester, $newSemester) !== 0) {
+                if (Course::hasEnrollmentData($courseId, $pdo)) {
+                    jsonResponse([
+                        'status' => 'error',
+                        'message' => 'Khong the doi hoc ky vi lop hoc phan da co du lieu dang ky/diem.',
+                        'fields' => [
+                            'ma_hoc_ky' => 'Khong the doi hoc ky khi da co du lieu hoc vu.',
+                        ],
+                    ], 409);
+                    return;
+                }
             }
 
             $roomConflict = $this->findClassroomConflict(
@@ -1215,6 +1554,189 @@ class CourseController
         } catch (Throwable $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
             jsonResponse(['status' => 'error', 'message' => 'Lá»—i há»‡ thá»‘ng.', 'detail' => $e->getMessage()], 500);
+        }
+    }
+
+    public function attendanceSheet()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+        if (!$this->isTeacher($identity)) {
+            jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
+            return;
+        }
+
+        $courseId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+        if ($courseId <= 0) {
+            jsonResponse(['status' => 'error', 'message' => 'Thieu ma lop hoc.'], 422);
+            return;
+        }
+
+        Teacher::ensureSchema();
+        Student::ensureSchema();
+        Course::ensureSchema();
+
+        $course = Course::findById($courseId);
+        if (!$course) {
+            jsonResponse(['status' => 'error', 'message' => 'Khong tim thay mon hoc.'], 404);
+            return;
+        }
+        if ((string)$course['teacher_code'] !== (string)$identity['login_id']) {
+            jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            Course::ensureSchema($pdo);
+            Attendance::ensureSchema($pdo);
+
+            $sessionId = isset($_GET['session_id']) ? (int)$_GET['session_id'] : 0;
+            $payload = $this->composeAttendancePayload($pdo, $courseId, $course, $sessionId);
+            jsonResponse($payload);
+        } catch (Throwable $e) {
+            jsonResponse(['status' => 'error', 'message' => 'Khong the tai diem danh.', 'detail' => $e->getMessage()], 500);
+        }
+    }
+
+    public function saveAttendance()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+        if (!$this->isTeacher($identity)) {
+            jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
+            return;
+        }
+
+        $payload = $this->parseJsonPayload();
+        if (!is_array($payload)) {
+            jsonResponse(['status' => 'error', 'message' => 'Du lieu khong hop le.'], 400);
+            return;
+        }
+
+        $courseId = (int)($payload['id'] ?? 0);
+        if ($courseId <= 0) {
+            jsonResponse(['status' => 'error', 'message' => 'Thieu ma lop hoc.'], 422);
+            return;
+        }
+
+        Teacher::ensureSchema();
+        Student::ensureSchema();
+        Course::ensureSchema();
+
+        $course = Course::findById($courseId);
+        if (!$course) {
+            jsonResponse(['status' => 'error', 'message' => 'Khong tim thay mon hoc.'], 404);
+            return;
+        }
+        if ((string)$course['teacher_code'] !== (string)$identity['login_id']) {
+            jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
+            return;
+        }
+
+        $sessionId = (int)($payload['session_id'] ?? 0);
+        $sessionDate = $this->normalizeSessionDate((string)($payload['session_date'] ?? ''));
+        $sessionNote = trim((string)($payload['session_note'] ?? ''));
+
+        if ($sessionId <= 0 && $sessionDate === '') {
+            jsonResponse(['status' => 'error', 'message' => 'Hay chon ngay hoc.'], 422);
+            return;
+        }
+        if ($sessionDate === '' && isset($payload['session_date'])) {
+            jsonResponse(['status' => 'error', 'message' => 'Ngay hoc khong hop le.'], 422);
+            return;
+        }
+
+        $rows = isset($payload['attendance']) && is_array($payload['attendance']) ? $payload['attendance'] : [];
+
+        try {
+            $payload = $this->runWithDbRetry(function () use ($courseId, $course, $sessionId, $sessionDate, $sessionNote, $rows) {
+                $pdo = get_db_connection();
+                $pdo->exec('PRAGMA busy_timeout = 5000');
+                $pdo->beginTransaction();
+                Course::ensureSchema($pdo);
+                Attendance::ensureSchema($pdo);
+
+                $maLHP = Attendance::resolveMaLhpByCourseId($pdo, $courseId);
+                if (!$maLHP) {
+                    $pdo->rollBack();
+                    jsonResponse(['status' => 'error', 'message' => 'Khong tim thay lop hoc phan.'], 404);
+                    return null;
+                }
+
+                $currentSessionId = $sessionId;
+                if ($currentSessionId > 0) {
+                    $current = Attendance::getSessionById($pdo, $currentSessionId);
+                    if (!$current || (string)($current['ma_lhp'] ?? '') !== $maLHP) {
+                        $pdo->rollBack();
+                        jsonResponse(['status' => 'error', 'message' => 'Khong tim thay buoi hoc.'], 404);
+                        return null;
+                    }
+                    $targetDate = $sessionDate !== '' ? $sessionDate : (string)($current['session_date'] ?? '');
+                    if ($targetDate === '') {
+                        $pdo->rollBack();
+                        jsonResponse(['status' => 'error', 'message' => 'Ngay hoc khong hop le.'], 422);
+                        return null;
+                    }
+                    Attendance::updateSession($pdo, $currentSessionId, $targetDate, $sessionNote);
+                } else {
+                    $existing = Attendance::getSessionByDate($pdo, $maLHP, $sessionDate);
+                    if ($existing) {
+                        $currentSessionId = (int)$existing['id'];
+                        Attendance::updateSession($pdo, $currentSessionId, $sessionDate, $sessionNote);
+                    } else {
+                        $currentSessionId = Attendance::createSession($pdo, $maLHP, $sessionDate, $sessionNote);
+                    }
+                }
+
+                $enrolled = Course::getStudentsByCourseId($courseId);
+                $allowed = [];
+                foreach ($enrolled as $student) {
+                    $code = trim((string)($student['student_code'] ?? ''));
+                    if ($code !== '') {
+                        $allowed[$code] = true;
+                    }
+                }
+
+                $saveRows = [];
+                foreach ($rows as $row) {
+                    $code = trim((string)($row['student_code'] ?? ''));
+                    if ($code === '' || !isset($allowed[$code])) {
+                        continue;
+                    }
+                    $status = $this->normalizeAttendanceStatus((string)($row['status'] ?? ''));
+                    if ($status === '') {
+                        $pdo->rollBack();
+                        jsonResponse(['status' => 'error', 'message' => 'Trang thai diem danh khong hop le.'], 422);
+                        return null;
+                    }
+                    $saveRows[] = [
+                        'student_code' => $code,
+                        'status' => $status,
+                    ];
+                }
+
+                if (!empty($saveRows)) {
+                    Attendance::upsertAttendance($pdo, $currentSessionId, $saveRows);
+                }
+
+                $pdo->commit();
+
+                return $this->composeAttendancePayload($pdo, $courseId, $course, $currentSessionId);
+            });
+
+            if ($payload === null) {
+                return;
+            }
+            jsonResponse($payload);
+        } catch (Throwable $e) {
+            jsonResponse(['status' => 'error', 'message' => 'Khong the luu diem danh.', 'detail' => $e->getMessage()], 500);
         }
     }
 
@@ -1399,7 +1921,9 @@ class CourseController
         Course::ensureSchema();
 
         $studentCode = (string)$identity['login_id'];
-        $rows = Course::listScoresByStudentCode($studentCode);
+        $rows = Course::listScoresByStudentCode($studentCode, [
+            'ma_hoc_ky' => isset($_GET['ma_hoc_ky']) ? trim((string)$_GET['ma_hoc_ky']) : '',
+        ]);
         $items = [];
         foreach ($rows as $row) {
             $wCc = (float)($row['weight_cc'] ?? 0);
@@ -1479,6 +2003,121 @@ class CourseController
                 'ck' => $ck,
                 'score' => $total,
                 'letter' => $this->letterGrade($total),
+            ],
+        ]);
+    }
+
+    public function updateEnrollmentStatus()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+        if (!$this->isStaff($identity)) {
+            jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
+            return;
+        }
+
+        $payload = $this->parseJsonPayload();
+        if (!is_array($payload)) {
+            jsonResponse(['status' => 'error', 'message' => 'Du lieu khong hop le.'], 400);
+            return;
+        }
+
+        $courseId = (int)($payload['id'] ?? 0);
+        $status = strtoupper(trim((string)($payload['enrollment_status'] ?? '')));
+        if ($courseId <= 0) {
+            jsonResponse(['status' => 'error', 'message' => 'Thieu ma lop hoc.'], 422);
+            return;
+        }
+        if (!in_array($status, ['DRAFT', 'OPEN', 'CLOSED', 'LOCKED'], true)) {
+            jsonResponse(['status' => 'error', 'message' => 'Trang thai dang ky khong hop le.'], 422);
+            return;
+        }
+
+        $current = Course::findById($courseId);
+        if (!$current) {
+            jsonResponse(['status' => 'error', 'message' => 'Khong tim thay lop hoc.'], 404);
+            return;
+        }
+
+        $fromStatus = strtoupper(trim((string)($current['enrollment_status'] ?? 'DRAFT')));
+        if (!$this->canTransitEnrollmentStatus($fromStatus, $status)) {
+            jsonResponse([
+                'status' => 'error',
+                'message' => sprintf('Khong the chuyen trang thai tu %s sang %s.', $fromStatus, $status),
+            ], 409);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            Course::ensureSchema($pdo);
+            $pdo->beginTransaction();
+            $ok = Course::updateEnrollmentStatusWithPdo($pdo, $courseId, $status);
+            if (!$ok) {
+                $pdo->rollBack();
+                jsonResponse(['status' => 'error', 'message' => 'Khong tim thay lop hoc.'], 404);
+                return;
+            }
+            $pdo->commit();
+            $course = Course::findById($courseId);
+            jsonResponse(['status' => 'success', 'data' => $course]);
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => 'Khong the cap nhat trang thai dang ky.', 'detail' => $e->getMessage()], 500);
+        }
+    }
+
+    public function failRateReport()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+        if (!$this->isStaff($identity)) {
+            jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
+            return;
+        }
+
+        $maHocKy = trim((string)($_GET['ma_hoc_ky'] ?? ''));
+        if ($maHocKy === '') {
+            jsonResponse(['status' => 'error', 'message' => 'Thieu ma hoc ky.'], 422);
+            return;
+        }
+
+        $thresholdRaw = trim((string)($_GET['threshold'] ?? '4'));
+        $threshold = is_numeric($thresholdRaw) ? (float)$thresholdRaw : 4.0;
+        if ($threshold < 0 || $threshold > 10) {
+            jsonResponse(['status' => 'error', 'message' => 'Threshold phai trong khoang 0-10.'], 422);
+            return;
+        }
+
+        Course::ensureSchema();
+        $items = Course::reportFailRateBySemester($maHocKy, $threshold);
+        $totalSections = count($items);
+        $totalStudents = 0;
+        $totalFailed = 0;
+        foreach ($items as $item) {
+            $totalStudents += (int)($item['so_sv'] ?? 0);
+            $totalFailed += (int)($item['so_rot'] ?? 0);
+        }
+        $avgFailRate = $totalStudents > 0 ? round(($totalFailed / $totalStudents) * 100, 2) : 0.0;
+
+        jsonResponse([
+            'status' => 'success',
+            'data' => [
+                'ma_hoc_ky' => $maHocKy,
+                'threshold' => $threshold,
+                'summary' => [
+                    'total_lop_hoc_phan' => $totalSections,
+                    'total_sinh_vien' => $totalStudents,
+                    'total_rot' => $totalFailed,
+                    'avg_fail_rate' => $avgFailRate,
+                ],
+                'items' => $items,
             ],
         ]);
     }

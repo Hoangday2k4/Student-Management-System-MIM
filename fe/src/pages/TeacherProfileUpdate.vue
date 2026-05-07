@@ -1,7 +1,6 @@
 ﻿<script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { FACULTY_OPTIONS } from '@/constants/options'
 
 const router = useRouter()
 const loading = ref(true)
@@ -16,7 +15,6 @@ const form = reactive({
   full_name: '',
   date_of_birth: '',
   gender: 'Nam',
-  department: FACULTY_OPTIONS[0],
   homeroom_class: '',
   email: '',
   phone: '',
@@ -26,7 +24,6 @@ const form = reactive({
 
 const errors = reactive({
   full_name: '',
-  department: '',
   email: '',
 })
 
@@ -45,7 +42,6 @@ function extractProfile(payload) {
 
 function resetErrors() {
   errors.full_name = ''
-  errors.department = ''
   errors.email = ''
 }
 
@@ -54,10 +50,6 @@ function validate() {
   let ok = true
   if (!form.full_name.trim()) {
     errors.full_name = 'Hãy nhập họ tên.'
-    ok = false
-  }
-  if (!form.department.trim()) {
-    errors.department = 'Hãy nhập khoa/bộ môn.'
     ok = false
   }
   if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
@@ -94,7 +86,6 @@ onMounted(async () => {
     form.full_name = p.full_name || ''
     form.date_of_birth = p.date_of_birth || ''
     form.gender = p.gender || 'Nam'
-    form.department = p.department || FACULTY_OPTIONS[0]
     form.homeroom_class = p.homeroom_class || ''
     form.email = p.email || ''
     form.phone = p.phone || ''
@@ -126,7 +117,6 @@ async function submitForm() {
     body.append('full_name', form.full_name.trim())
     body.append('date_of_birth', form.date_of_birth)
     body.append('gender', form.gender)
-    body.append('department', form.department)
     body.append('homeroom_class', form.homeroom_class.trim())
     body.append('email', form.email.trim())
     body.append('phone', form.phone.trim())
@@ -187,14 +177,6 @@ async function submitForm() {
           <option value="Nữ">Nữ</option>
         </select>
 
-        <label>Khoa/Bộ môn *</label>
-        <div>
-          <select v-model="form.department">
-            <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
-          </select>
-          <p v-if="errors.department" class="error">{{ errors.department }}</p>
-        </div>
-
         <label>Email</label>
         <div>
           <input v-model="form.email" type="email" />
@@ -237,7 +219,6 @@ async function submitForm() {
           <span class="label">Họ tên</span><span>{{ form.full_name }}</span>
           <span class="label">Ngày sinh</span><span>{{ form.date_of_birth || '-' }}</span>
           <span class="label">Giới tính</span><span>{{ form.gender }}</span>
-          <span class="label">Khoa/Bộ môn</span><span>{{ form.department }}</span>
           <span class="label">Lớp phụ trách</span><span>{{ form.homeroom_class || '-' }}</span>
           <span class="label">Email</span><span>{{ form.email || '-' }}</span>
           <span class="label">Số điện thoại</span><span>{{ form.phone || '-' }}</span>

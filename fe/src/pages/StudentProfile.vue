@@ -63,7 +63,6 @@ onMounted(async () => {
           <p><b>Ngày sinh:</b> {{ profile.date_of_birth || '-' }}</p>
           <p><b>Giới tính:</b> {{ profile.gender || '-' }}</p>
           <p><b>Lớp:</b> {{ profile.class_name }}</p>
-          <p><b>Khoa / Viện:</b> {{ profile.faculty || '-' }}</p>
           <p><b>Email:</b> {{ profile.email || '-' }}</p>
           <p><b>Số điện thoại:</b> {{ profile.phone || '-' }}</p>
           <p><b>Trạng thái:</b> {{ profile.status || '-' }}</p>

@@ -1,0 +1,190 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: Composer install (if configured)
+        shell: bash
+        run: |
+          if [ -f api/composer.json ]; then
+            composer install --no-interaction --prefer-dist --working-dir=api
+          else
+            echo "Skip Composer install (no composer.json)."
+          fi
+      - name: PHP Unit (if available)
+        shell: bash
+        run: |
+          if [ -x api/vendor/bin/phpunit ]; then
+            api/vendor/bin/phpunit
+          else
+            echo "Skip PHP unit tests (phpunit not installed)."
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+      - name: FE Unit (if configured)
+        shell: bash
+        run: |
+          if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s['test:unit']||s.test?0:1)"; then
+            pnpm -C fe install
+            if pnpm -C fe run test:unit; then
+              exit 0
+            fi
+            pnpm -C fe run test
+          else
+            echo "Skip FE unit tests (no test script)."
+          fi
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: Composer install (if configured)
+        shell: bash
+        run: |
+          if [ -f api/composer.json ]; then
+            composer install --no-interaction --prefer-dist --working-dir=api
+          else
+            echo "Skip Composer install (no composer.json)."
+          fi
+      - name: Integration (if configured)
+        shell: bash
+        run: |
+          if [ -f api/tests/integration/run.sh ]; then
+            bash api/tests/integration/run.sh
+          else
+            echo "Skip integration tests (no runner found)."
+          fi
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+      - name: E2E (Cypress/Selenium if configured)
+        shell: bash
+        run: |
+          if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s['e2e']||s['cy:run']?0:1)"; then
+            pnpm -C fe install
+            pnpm -C fe run dev -- --host 0.0.0.0 --port 5173 &
+            node -e "const http=require('http');const start=Date.now();(function check(){http.get('http://127.0.0.1:5173',res=>{res.destroy();console.log('Vite is up');}).on('error',()=>{if(Date.now()-start>60000){console.error('Vite did not start in time');process.exit(1);}setTimeout(check,1000);});})();"
+            if pnpm -C fe run e2e; then
+              exit 0
+            fi
+            pnpm -C fe run cy:run
+          else
+            echo "Skip E2E tests (no e2e script)."
+          fi
+
+  ui-tests:
+    name: UI / Frontend Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+      - name: Vue UI tests (if configured)
+        shell: bash
+        run: |
+          if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s['test:ui']||s['test:unit']?0:1)"; then
+            pnpm -C fe install
+            if pnpm -C fe run test:ui; then
+              exit 0
+            fi
+            pnpm -C fe run test:unit
+          else
+            echo "Skip UI tests (no ui/unit test script)."
+          fi
+
+  api-tests:
+    name: API Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Newman (if Postman collection exists)
+        shell: bash
+        run: |
+          if ls tests/postman/*.json >/dev/null 2>&1; then
+            npm install -g newman
+            for f in tests/postman/*.json; do
+              if [ -f tests/postman/sample.environment.json ]; then
+                newman run "$f" -e tests/postman/sample.environment.json
+              else
+                newman run "$f"
+              fi
+            done
+          else
+            echo "Skip API tests (no Postman collection)."
+          fi
+
+  static-analysis:
+    name: Static Code Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: Composer install (if configured)
+        shell: bash
+        run: |
+          if [ -f api/composer.json ]; then
+            composer install --no-interaction --prefer-dist --working-dir=api
+          else
+            echo "Skip Composer install (no composer.json)."
+          fi
+      - name: PHP syntax check
+        shell: bash
+        run: |
+          find api -name "*.php" -print0 | xargs -0 -n 1 php -l
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+      - name: ESLint (if configured)
+        shell: bash
+        run: |
+          if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s.lint?0:1)"; then
+            pnpm -C fe install
+            pnpm -C fe run lint
+          else
+            echo "Skip ESLint (no lint script)."
+          fi
+      - name: SonarQube (optional)
+        if: env.SONAR_TOKEN != ''
+        uses: sonarsource/sonarqube-scan-action@v2.0.2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

@@ -1,0 +1,13 @@
+{
+  "id": "sample-env",
+  "name": "Sample Environment",
+  "values": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost",
+      "enabled": true
+    }
+  ],
+  "_postman_variable_scope": "environment",
+  "_postman_exported_using": "Postman/10.x"
+}

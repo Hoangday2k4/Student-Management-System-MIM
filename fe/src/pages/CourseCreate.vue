@@ -1,7 +1,6 @@
 ﻿<script setup>
 import { reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { FACULTY_OPTIONS } from '@/constants/options'
 
 const router = useRouter()
 const canCreate = ref(null)
@@ -11,6 +10,8 @@ const serverMessage = ref('')
 const created = ref(null)
 
 const fileInputRef = ref(null)
+const teacherOptions = ref([])
+const teacherLoadError = ref('')
 const bulkRows = ref([])
 const bulkSkippedInFile = ref([])
 const bulkFileName = ref('')
@@ -21,7 +22,6 @@ const form = reactive({
   course_name: '',
   credits: '',
   teacher_code: '',
-  department: '',
   schedule: '',
   classroom: '',
   max_students: '',
@@ -63,6 +63,23 @@ async function loadPermission() {
 }
 loadPermission()
 
+async function loadTeachers() {
+  teacherLoadError.value = ''
+  try {
+    const res = await fetch('/api/teacher.php')
+    if (res.status === 401) {
+      router.replace('/login')
+      return
+    }
+    const data = await res.json().catch(() => ([]))
+    teacherOptions.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    teacherOptions.value = []
+    teacherLoadError.value = 'Khong tai duoc danh sach giao vien.'
+  }
+}
+loadTeachers()
+
 function resetErrors() {
   errors.course_code = ''
   errors.course_name = ''
@@ -72,6 +89,14 @@ function resetErrors() {
   errors.schedule = ''
   errors.classroom = ''
   serverMessage.value = ''
+}
+
+function getTeacherLabel(teacher) {
+  const code = String(teacher?.teacher_code || '').trim()
+  const name = String(teacher?.full_name || '').trim()
+  if (!code && !name) return ''
+  if (!name) return code
+  return `${code} - ${name}`
 }
 
 function validateForm() {
@@ -85,10 +110,6 @@ function validateForm() {
     errors.course_name = 'Hãy nhập tên môn học.'
     ok = false
   }
-  if (!asText(form.teacher_code)) {
-    errors.teacher_code = 'Hãy nhập mã giáo viên.'
-    ok = false
-  }
   if (form.credits !== '' && (!/^\d+$/.test(form.credits) || Number(form.credits) <= 0)) {
     errors.credits = 'Số tín chỉ phải là số nguyên dương.'
     ok = false
@@ -97,7 +118,6 @@ function validateForm() {
     errors.max_students = 'Số lượng tối đa phải là số nguyên dương.'
     ok = false
   }
-
   const scheduleItems = splitMultiValues(form.schedule).map((item) => item.toUpperCase())
   for (const value of scheduleItems) {
     const m = value.match(/^T([2-7])-\((\d{1,2})-(\d{1,2})\)$/)
@@ -215,7 +235,7 @@ async function submitForm() {
   saving.value = true
   serverMessage.value = ''
   try {
-    const res = await fetch('/api/courses', {
+    const res = await fetch('/api/course.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -223,7 +243,6 @@ async function submitForm() {
         course_name: asText(form.course_name),
         credits: asText(form.credits),
         teacher_code: asText(form.teacher_code),
-        department: asText(form.department),
         schedule: asText(form.schedule),
         classroom: asText(form.classroom),
         max_students: asText(form.max_students),
@@ -296,17 +315,20 @@ async function submitForm() {
             <p v-if="errors.credits" class="error">{{ errors.credits }}</p>
           </div>
 
-          <label>MSGV *</label>
+          <label>MSGV (tùy chọn)</label>
           <div>
-            <input v-model="form.teacher_code" type="text" maxlength="30" />
+            <select v-model="form.teacher_code">
+              <option value="">-- Không gán giáo viên --</option>
+              <option v-for="teacher in teacherOptions" :key="teacher.teacher_code" :value="teacher.teacher_code">
+                {{ getTeacherLabel(teacher) }}
+              </option>
+            </select>
             <p v-if="errors.teacher_code" class="error">{{ errors.teacher_code }}</p>
+            <p v-if="teacherLoadError" class="error">{{ teacherLoadError }}</p>
           </div>
 
-          <label>Khoa/Bộ môn</label>
-          <select v-model="form.department">
-            <option value="">-- Chọn khoa/bộ môn --</option>
-            <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
-          </select>
+          <label>Học kỳ</label>
+          <div class="hint-box">Hệ thống tự gán theo học kỳ hiện tại (ACTIVE + IsCurrent).</div>
 
           <label>Lịch học</label>
           <div>
@@ -329,7 +351,8 @@ async function submitForm() {
           <p v-if="serverMessage" class="error">{{ serverMessage }}</p>
           <p class="import-hint">
             Cột mặc định file import:
-            <b>Mã môn học</b>, <b>Tên môn học</b>, <b>Số tín chỉ</b>, <b>MSGV</b>, <b>Khoa/Bộ môn</b>, <b>Lịch học</b>, <b>Phòng học</b>, <b>Số lượng tối đa</b>.
+            <b>Mã môn học</b>, <b>Tên môn học</b>, <b>Số tín chỉ</b>, <b>Lịch học</b>, <b>Phòng học</b>, <b>Số lượng tối đa</b>.
+            Cột <b>MSGV</b> là tùy chọn.
           </p>
           <div class="actions">
             <button type="submit" class="btn-primary">Xác nhận</button>
@@ -351,8 +374,8 @@ async function submitForm() {
             <span class="label">Mã môn học</span><span>{{ form.course_code }}</span>
             <span class="label">Tên môn học</span><span>{{ form.course_name }}</span>
             <span class="label">Số tín chỉ</span><span>{{ form.credits || '-' }}</span>
-            <span class="label">MSGV</span><span>{{ form.teacher_code }}</span>
-            <span class="label">Khoa/Bộ môn</span><span>{{ form.department || '-' }}</span>
+            <span class="label">MSGV</span><span>{{ form.teacher_code || '-' }}</span>
+            <span class="label">Học kỳ</span><span>Tự động theo học kỳ hiện tại</span>
             <span class="label">Lịch học</span><span>{{ form.schedule || '-' }}</span>
             <span class="label">Phòng học</span><span>{{ form.classroom || '-' }}</span>
             <span class="label">Số lượng tối đa</span><span>{{ form.max_students || '-' }}</span>
@@ -377,8 +400,7 @@ async function submitForm() {
                   <th>Mã môn học</th>
                   <th>Tên môn học</th>
                   <th>Số tín chỉ</th>
-                  <th>MSGV</th>
-                  <th>Khoa/Bộ môn</th>
+                  <th>MSGV (tùy chọn)</th>
                   <th>Lịch học</th>
                   <th>Phòng học</th>
                   <th>Số lượng tối đa</th>
@@ -390,7 +412,6 @@ async function submitForm() {
                   <td>{{ row.course_name }}</td>
                   <td>{{ row.credits || '-' }}</td>
                   <td>{{ row.teacher_code }}</td>
-                  <td>{{ row.department || '-' }}</td>
                   <td>{{ row.schedule || '-' }}</td>
                   <td>{{ row.classroom || '-' }}</td>
                   <td>{{ row.max_students || '-' }}</td>
@@ -463,6 +484,14 @@ input, select {
   border: 1px solid #c7d3e2;
   border-radius: 8px;
   padding: 10px 12px;
+}
+.hint-box {
+  border: 1px dashed #c6d7eb;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #f3f8ff;
+  color: #35506f;
+  font-size: 13px;
 }
 .confirm-box { border: 1px solid #d7deea; border-radius: 12px; padding: 16px; background: #f7faff; }
 .label { font-weight: 700; color: #1f3553; }

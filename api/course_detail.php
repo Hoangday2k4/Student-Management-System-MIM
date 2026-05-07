@@ -20,6 +20,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = strtolower(trim((string)($_GET['action'] ?? '')));
+    if ($action === 'add-students') {
+        $controller->addStudents();
+        exit;
+    }
     $controller->update();
     exit;
 }

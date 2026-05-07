@@ -39,6 +39,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
+const AUTH_FLAG_KEY = 'sms_auth'
 const form = reactive({ login_id: '', password: '' })
 const errors = reactive({ login_id: '', password: '', login: '' })
 const submitting = ref(false)
@@ -113,6 +114,7 @@ const onSubmit = async () => {
       return
     }
     if (result.status === 'success') {
+      localStorage.setItem(AUTH_FLAG_KEY, '1')
       router.push('/')
     } else if (result.errors) {
       Object.assign(errors, result.errors)

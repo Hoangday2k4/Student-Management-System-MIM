@@ -4,6 +4,7 @@ import { RouterView, useRoute, useRouter } from 'vue-router'
 
 const router = useRouter()
 const route = useRoute()
+const AUTH_FLAG_KEY = 'sms_auth'
 const loginInfo = ref({ login_id: '', login_time: '', account_type: '', display_name: '' })
 const pendingResetCount = ref(0)
 
@@ -46,6 +47,8 @@ const menuItems = computed(() => {
       { key: 'teacher-search', label: 'Tìm kiếm giáo viên', to: { name: 'teacher-search' } },
       { key: 'course-create', label: 'Tạo lớp học', to: { name: 'course-create' } },
       { key: 'course-manage', label: 'Quản lý môn học', to: { name: 'course-manage' } },
+      { key: 'course-fail-report', label: 'Báo cáo rớt môn', to: { name: 'course-fail-report' } },
+      { key: 'semester-manage', label: 'Quản lý học kỳ', to: { name: 'semester-manage' } },
       { key: 'change-password', label: 'Đổi mật khẩu', to: { name: 'change-password' } },
     ]
   }
@@ -83,6 +86,12 @@ function isActive(itemKey) {
   if (currentKey === 'course-my') {
     return isTeacher.value ? itemKey === 'teacher-course-my' : itemKey === 'student-course-my'
   }
+  if (currentKey === 'semester-create' || currentKey === 'semester-update') {
+    return itemKey === 'semester-manage'
+  }
+  if (currentKey === 'course-fail-report') {
+    return itemKey === 'course-fail-report'
+  }
   return currentKey === itemKey
 }
 
@@ -115,17 +124,21 @@ onMounted(async () => {
   try {
     const res = await fetch('/api/home')
     if (!res.ok) {
+      localStorage.removeItem(AUTH_FLAG_KEY)
       router.replace({ name: 'login' })
       return
     }
     const data = await parseJsonSafe(res)
     if (!data?.login_id) {
+      localStorage.removeItem(AUTH_FLAG_KEY)
       router.replace({ name: 'login' })
       return
     }
+    localStorage.setItem(AUTH_FLAG_KEY, '1')
     loginInfo.value = data
     await loadPendingResetCount()
   } catch (error) {
+    localStorage.removeItem(AUTH_FLAG_KEY)
     router.replace({ name: 'login' })
   }
 })
@@ -149,6 +162,7 @@ async function handleLogout() {
   } catch (error) {
     // ignore
   }
+  localStorage.removeItem(AUTH_FLAG_KEY)
   router.replace({ name: 'login' })
 }
 </script>

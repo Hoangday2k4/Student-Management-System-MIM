@@ -1,11 +1,14 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { listSemesters } from '@/services/semesterService'
 
 const router = useRouter()
 const loading = ref(true)
 const errorMessage = ref('')
 const rows = ref([])
+const semesterOptions = ref([])
+const selectedSemester = ref('')
 
 const scoredRows = computed(() =>
   rows.value.filter((row) => {
@@ -48,7 +51,8 @@ async function loadData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const res = await fetch('/api/scores')
+    const query = selectedSemester.value ? `?ma_hoc_ky=${encodeURIComponent(selectedSemester.value)}` : ''
+    const res = await fetch(`/api/scores${query}`)
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
       if (res.status === 401) {
@@ -68,13 +72,38 @@ async function loadData() {
   }
 }
 
-onMounted(loadData)
+async function loadSemesters() {
+  try {
+    const items = await listSemesters({ include_inactive: 'false' })
+    semesterOptions.value = Array.isArray(items) ? items : []
+    if (!selectedSemester.value && semesterOptions.value.length > 0) {
+      const current = semesterOptions.value.find((s) => s.is_current)
+      selectedSemester.value = String((current || semesterOptions.value[0])?.ma_hoc_ky || '')
+    }
+  } catch (error) {
+    semesterOptions.value = []
+  }
+}
+
+onMounted(async () => {
+  await loadSemesters()
+  await loadData()
+})
 </script>
 
 <template>
   <div class="page">
     <div class="card">
       <h1>Điểm thi</h1>
+      <div class="toolbar">
+        <label>Học kỳ</label>
+        <select v-model="selectedSemester" @change="loadData">
+          <option value="">Tất cả</option>
+          <option v-for="semester in semesterOptions" :key="semester.ma_hoc_ky" :value="semester.ma_hoc_ky">
+            {{ semester.ma_hoc_ky }} - {{ semester.ten_hoc_ky }} - {{ semester.nam_hoc }}
+          </option>
+        </select>
+      </div>
       <p v-if="loading" class="state">Đang tải dữ liệu...</p>
       <p v-else-if="errorMessage" class="state error">{{ errorMessage }}</p>
       <div v-else-if="scoredRows.length === 0" class="state">Chưa có dữ liệu điểm.</div>
@@ -128,6 +157,8 @@ onMounted(loadData)
   flex-direction: column;
 }
 h1 { margin: 0 0 14px; color: #007336; }
+.toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+.toolbar select { border: 1px solid #c7d3e2; border-radius: 8px; padding: 8px 10px; }
 .state { background: #f4f7fc; padding: 12px; border-radius: 8px; }
 .state.error { color: #c52a2a; background: #fdeeee; }
 .table-scroll { margin-top: 10px; overflow: auto; min-height: 0; max-height: 320px; }

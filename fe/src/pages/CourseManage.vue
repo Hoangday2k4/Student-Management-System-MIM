@@ -1,7 +1,7 @@
 ﻿<script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FACULTY_OPTIONS } from '@/constants/options'
+import { listSemesters } from '@/services/semesterService'
 
 const route = useRoute()
 const router = useRouter()
@@ -10,29 +10,40 @@ const searched = ref(false)
 const courses = ref([])
 const errorMessage = ref('')
 const deletingId = ref(0)
+const statusSavingId = ref(0)
+const semesterOptions = ref([])
 
 const filters = reactive({
   keyword: '',
-  department: '',
   teacher_code: '',
+  ma_hoc_ky: '',
 })
 
 function buildQuery() {
   const params = new URLSearchParams()
   if (filters.keyword.trim()) params.append('keyword', filters.keyword.trim())
-  if (filters.department.trim()) params.append('department', filters.department.trim())
   if (filters.teacher_code.trim()) params.append('teacher_code', filters.teacher_code.trim())
+  if (filters.ma_hoc_ky.trim()) params.append('ma_hoc_ky', filters.ma_hoc_ky.trim())
   return params.toString()
 }
 
 const searchStateQuery = computed(() => {
   const q = {}
   if (filters.keyword.trim()) q.keyword = filters.keyword.trim()
-  if (filters.department.trim()) q.department = filters.department.trim()
   if (filters.teacher_code.trim()) q.teacher_code = filters.teacher_code.trim()
+  if (filters.ma_hoc_ky.trim()) q.ma_hoc_ky = filters.ma_hoc_ky.trim()
   q.searched = searched.value ? '1' : '0'
   return q
 })
+
+async function loadSemesters() {
+  try {
+    const items = await listSemesters({ include_inactive: 'false' })
+    semesterOptions.value = Array.isArray(items) ? items : []
+  } catch (error) {
+    semesterOptions.value = []
+  }
+}
 
 async function doSearch() {
   searched.value = true
@@ -41,7 +52,7 @@ async function doSearch() {
   router.replace({ query: searchStateQuery.value })
   try {
     const query = buildQuery()
-    const res = await fetch(query ? `/api/courses?${query}` : '/api/courses')
+    const res = await fetch(query ? `/api/course.php?${query}` : '/api/course.php')
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
       errorMessage.value = data.message || data.error || 'Không thể tải dữ liệu môn học.'
@@ -75,7 +86,7 @@ async function deleteCourse(course) {
   deletingId.value = id
   errorMessage.value = ''
   try {
-    const res = await fetch(`/api/courses?id=${id}`, { method: 'DELETE' })
+    const res = await fetch(`/api/course.php?id=${id}`, { method: 'DELETE' })
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.status !== 'success') {
       errorMessage.value = data.message || 'Không thể xóa môn học.'
@@ -89,11 +100,41 @@ async function deleteCourse(course) {
   }
 }
 
+async function updateEnrollmentStatus(course) {
+  const id = Number(course?.id || 0)
+  const status = String(course?.enrollment_status || '').trim().toUpperCase()
+  if (!id || !status) return
+  statusSavingId.value = id
+  errorMessage.value = ''
+  try {
+    const res = await fetch('/api/courses/enrollment-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, enrollment_status: status }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || data.status !== 'success') {
+      errorMessage.value = data.message || 'Khong the cap nhat trang thai dang ky.'
+      await doSearch()
+      return
+    }
+    const idx = courses.value.findIndex((item) => Number(item.id) === id)
+    if (idx >= 0) {
+      courses.value[idx] = data.data || courses.value[idx]
+    }
+  } catch (error) {
+    errorMessage.value = 'Khong ket noi duoc may chu.'
+  } finally {
+    statusSavingId.value = 0
+  }
+}
+
 onMounted(() => {
   filters.keyword = String(route.query.keyword || '')
-  filters.department = String(route.query.department || '')
   filters.teacher_code = String(route.query.teacher_code || '')
+  filters.ma_hoc_ky = String(route.query.ma_hoc_ky || '')
   searched.value = String(route.query.searched || '0') === '1'
+  loadSemesters()
   if (searched.value) {
     doSearch()
   }
@@ -111,15 +152,17 @@ onMounted(() => {
           <input v-model="filters.keyword" type="text" placeholder="Mã môn, tên môn, phòng, lịch học..." />
         </div>
         <div>
-          <label>Khoa/Bộ môn</label>
-          <select v-model="filters.department">
-            <option value="">Tất cả</option>
-            <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
-          </select>
-        </div>
-        <div>
           <label>MSGV</label>
           <input v-model="filters.teacher_code" type="text" placeholder="Ví dụ: GV001" />
+        </div>
+        <div>
+          <label>Học kỳ</label>
+          <select v-model="filters.ma_hoc_ky">
+            <option value="">Tất cả</option>
+            <option v-for="semester in semesterOptions" :key="semester.ma_hoc_ky" :value="semester.ma_hoc_ky">
+              {{ semester.ma_hoc_ky }} - {{ semester.ten_hoc_ky }} - {{ semester.nam_hoc }}
+            </option>
+          </select>
         </div>
       </div>
 
@@ -144,6 +187,8 @@ onMounted(() => {
                 <th>Lịch học</th>
                 <th>Phòng học</th>
                 <th>Giáo viên</th>
+                <th>Học kỳ</th>
+                <th>Đăng ký</th>
                 <th>Sĩ số</th>
                 <th>Action</th>
               </tr>
@@ -156,6 +201,25 @@ onMounted(() => {
                 <td>{{ course.schedule || '-' }}</td>
                 <td>{{ course.classroom || '-' }}</td>
                 <td>{{ course.teacher_name || course.teacher_code }}</td>
+                <td>{{ course.ma_hoc_ky || '-' }}</td>
+                <td>
+                  <div class="status-editor">
+                    <select v-model="course.enrollment_status" :disabled="statusSavingId === Number(course.id)">
+                      <option value="DRAFT">Nhap</option>
+                      <option value="OPEN">Dang mo</option>
+                      <option value="CLOSED">Da dong</option>
+                      <option value="LOCKED">Da khoa</option>
+                    </select>
+                    <button
+                      class="mini-btn"
+                      type="button"
+                      :disabled="statusSavingId === Number(course.id)"
+                      @click="updateEnrollmentStatus(course)"
+                    >
+                      {{ statusSavingId === Number(course.id) ? 'Luu...' : 'Luu' }}
+                    </button>
+                  </div>
+                </td>
                 <td>{{ course.enrolled_count || 0 }} / {{ course.max_students || '-' }}</td>
                 <td class="action-cell">
                   <RouterLink class="icon-btn" :to="detailLink(course.id)" title="Xem chi tiết" aria-label="Xem chi tiết">
@@ -295,6 +359,22 @@ input, select { width: 100%; box-sizing: border-box; border: 1px solid #c7d3e2; 
 .danger-btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+.status-editor {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.status-editor select {
+  min-width: 92px;
+  padding: 6px 8px;
+}
+.mini-btn {
+  border: 1px solid #c7d3e2;
+  background: #f8fbff;
+  border-radius: 6px;
+  padding: 6px 8px;
+  cursor: pointer;
 }
 @media (max-width: 980px) {
   .filter-grid { grid-template-columns: 1fr; }

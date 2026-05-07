@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../models/Teacher.php';
 require_once __DIR__ . '/../models/Admin.php';
+require_once __DIR__ . '/../models/HomeroomClass.php';
 require_once __DIR__ . '/../helpers/response.php';
 
 class TeacherController
@@ -22,6 +23,21 @@ class TeacherController
         if ($g === 'male' || $g === 'nam') return 'Nam';
         if ($g === 'female' || $g === 'nữ' || $g === 'nu') return 'Nữ';
         return '';
+    }
+
+    private function normalizeOptionalHomeroomClass(string $homeroomClass, ?PDO $pdo = null): string
+    {
+        $value = trim($homeroomClass);
+        if ($value === '') {
+            return '';
+        }
+
+        if (!$pdo) {
+            $pdo = get_db_connection();
+        }
+        $stmt = $pdo->prepare('SELECT 1 FROM LopSinhHoat WHERE lower(MaLop) = lower(:ma_lop) LIMIT 1');
+        $stmt->execute([':ma_lop' => $value]);
+        return $stmt->fetchColumn() ? $value : '';
     }
 
     private function normalizeStatus(string $status): string
@@ -106,7 +122,6 @@ class TeacherController
         $statusFilter = isset($_GET['status']) ? $this->normalizeStatus((string)$_GET['status']) : '';
         $teachers = Teacher::search([
             'keyword' => isset($_GET['keyword']) ? trim((string)$_GET['keyword']) : '',
-            'department' => isset($_GET['department']) ? trim((string)$_GET['department']) : '',
             'status' => $statusFilter,
         ]);
         foreach ($teachers as &$teacher) {
@@ -157,7 +172,6 @@ class TeacherController
 
         $teacherCode = trim((string)($payload['teacher_code'] ?? ''));
         $fullName = trim((string)($payload['full_name'] ?? ''));
-        $department = trim((string)($payload['department'] ?? ''));
         $email = trim((string)($payload['email'] ?? ''));
         $gender = $this->normalizeGender((string)($payload['gender'] ?? ''));
         $status = $this->normalizeStatus((string)($payload['status'] ?? ''));
@@ -165,7 +179,6 @@ class TeacherController
         $errors = [];
         if ($teacherCode === '') $errors['teacher_code'] = 'Hay nhap ma giao vien.';
         if ($fullName === '') $errors['full_name'] = 'Hay nhap ho ten.';
-        if ($department === '') $errors['department'] = 'Hay nhap khoa/bo mon.';
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Email khong hop le.';
         if ($gender === '') $errors['gender'] = 'Gioi tinh khong hop le.';
         if ($status === '') $errors['status'] = 'Trang thai khong hop le.';
@@ -180,15 +193,18 @@ class TeacherController
             $pdo->exec('PRAGMA busy_timeout = 5000');
             Admin::ensureSchema($pdo);
             Teacher::ensureSchema($pdo);
+            HomeroomClass::ensureSchema($pdo);
             $pdo->beginTransaction();
+
+            $homeroomClass = $this->normalizeOptionalHomeroomClass((string)($payload['homeroom_class'] ?? ''), $pdo);
 
             $teacherId = Teacher::insertWithPdo($pdo, [
                 'teacher_code' => $teacherCode,
                 'full_name' => $fullName,
                 'date_of_birth' => trim((string)($payload['date_of_birth'] ?? '')),
                 'gender' => $gender,
-                'department' => $department,
-                'homeroom_class' => trim((string)($payload['homeroom_class'] ?? '')),
+                'department' => '',
+                'homeroom_class' => $homeroomClass,
                 'email' => $email,
                 'phone' => trim((string)($payload['phone'] ?? '')),
                 'avatar' => '',
@@ -255,7 +271,7 @@ class TeacherController
         $rows = [];
         $handle = fopen($filePath, 'rb');
         if (!$handle) return $rows;
-        while (($data = fgetcsv($handle)) !== false) {
+        while (($data = fgetcsv($handle, 0, ',', '"', '')) !== false) {
             $row = [];
             foreach ($data as $cell) {
                 $row[] = trim((string)$cell);
@@ -396,7 +412,6 @@ class TeacherController
             'full_name' => ['hoten', 'hten', 'fullname', 'tengiaovien'],
             'date_of_birth' => ['ngaysinh', 'dateofbirth', 'dob'],
             'gender' => ['gioitinh', 'gender'],
-            'department' => ['khoa', 'vien', 'khoavien', 'bomon', 'khoabomon', 'department'],
             'email' => ['email'],
             'homeroom_class' => ['lopphutrach', 'lopchunhiem', 'homeroomclass'],
             'phone' => ['sodienthoai', 'sdt', 'phone'],
@@ -414,17 +429,16 @@ class TeacherController
             }
         }
 
-        if (count($headers) >= 9) {
+        if (count($headers) >= 8) {
             $defaultMap = [
                 'teacher_code' => 0,
                 'full_name' => 1,
                 'date_of_birth' => 2,
                 'gender' => 3,
-                'department' => 4,
-                'email' => 5,
-                'homeroom_class' => 6,
-                'phone' => 7,
-                'status' => 8,
+                'email' => 4,
+                'homeroom_class' => 5,
+                'phone' => 6,
+                'status' => 7,
             ];
             foreach ($defaultMap as $field => $position) {
                 if (!isset($headerMap[$field])) {
@@ -433,7 +447,7 @@ class TeacherController
             }
         }
 
-        foreach (['teacher_code', 'full_name', 'department'] as $requiredField) {
+        foreach (['teacher_code', 'full_name'] as $requiredField) {
             if (!isset($headerMap[$requiredField])) {
                 throw new RuntimeException('File thieu cot bat buoc: ' . $requiredField);
             }
@@ -451,17 +465,16 @@ class TeacherController
                 'full_name' => trim((string)($source[$headerMap['full_name']] ?? '')),
                 'date_of_birth' => trim((string)($source[$headerMap['date_of_birth'] ?? -1] ?? '')),
                 'gender' => trim((string)($source[$headerMap['gender'] ?? -1] ?? 'Nam')),
-                'department' => trim((string)($source[$headerMap['department']] ?? '')),
                 'email' => trim((string)($source[$headerMap['email'] ?? -1] ?? '')),
                 'homeroom_class' => trim((string)($source[$headerMap['homeroom_class'] ?? -1] ?? '')),
                 'phone' => trim((string)($source[$headerMap['phone'] ?? -1] ?? '')),
                 'status' => trim((string)($source[$headerMap['status'] ?? -1] ?? 'Dang cong tac')),
             ];
 
-            if ($row['teacher_code'] === '' && $row['full_name'] === '' && $row['department'] === '') {
+            if ($row['teacher_code'] === '' && $row['full_name'] === '') {
                 continue;
             }
-            if ($row['teacher_code'] === '' || $row['full_name'] === '' || $row['department'] === '') {
+            if ($row['teacher_code'] === '' || $row['full_name'] === '') {
                 $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Thieu truong bat buoc'];
                 continue;
             }
@@ -488,7 +501,6 @@ class TeacherController
             'full_name' => trim((string)($row['full_name'] ?? '')),
             'date_of_birth' => trim((string)($row['date_of_birth'] ?? '')),
             'gender' => $gender,
-            'department' => trim((string)($row['department'] ?? '')),
             'email' => trim((string)($row['email'] ?? '')),
             'homeroom_class' => trim((string)($row['homeroom_class'] ?? '')),
             'phone' => trim((string)($row['phone'] ?? '')),
@@ -554,12 +566,14 @@ class TeacherController
             $pdo->exec('PRAGMA busy_timeout = 5000');
             Admin::ensureSchema($pdo);
             Teacher::ensureSchema($pdo);
+            HomeroomClass::ensureSchema($pdo);
             $pdo->beginTransaction();
 
             $inserted = 0;
             $skipped = [];
             $existingTeachers = [];
             $existingLogins = [];
+            $existingEmails = [];
 
             $teacherCodes = $pdo->query('SELECT MaGV FROM GiangVien')->fetchAll(PDO::FETCH_COLUMN);
             foreach ($teacherCodes as $code) {
@@ -569,18 +583,27 @@ class TeacherController
             foreach ($loginIds as $loginId) {
                 $existingLogins[strtolower(trim((string)$loginId))] = true;
             }
+            $emails = $pdo->query('SELECT Email FROM GiangVien WHERE Email IS NOT NULL AND trim(Email) <> ""')->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($emails as $email) {
+                $existingEmails[strtolower(trim((string)$email))] = true;
+            }
 
             foreach ($rows as $idx => $raw) {
                 $line = $idx + 2;
                 $row = $this->normalizeImportRow(is_array($raw) ? $raw : []);
                 $teacherCodeKey = strtolower($row['teacher_code']);
+                $emailKey = strtolower(trim((string)$row['email']));
 
-                if ($row['teacher_code'] === '' || $row['full_name'] === '' || $row['department'] === '') {
+                if ($row['teacher_code'] === '' || $row['full_name'] === '') {
                     $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Thieu truong bat buoc'];
                     continue;
                 }
                 if ($row['email'] !== '' && !filter_var($row['email'], FILTER_VALIDATE_EMAIL)) {
                     $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Email khong hop le'];
+                    continue;
+                }
+                if ($emailKey !== '' && isset($existingEmails[$emailKey])) {
+                    $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Email da ton tai'];
                     continue;
                 }
                 if (isset($existingTeachers[$teacherCodeKey])) {
@@ -591,23 +614,42 @@ class TeacherController
                     $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Login da ton tai'];
                     continue;
                 }
-
-                Teacher::insertWithPdo($pdo, [
-                    'teacher_code' => $row['teacher_code'],
-                    'full_name' => $row['full_name'],
-                    'date_of_birth' => $row['date_of_birth'],
-                    'gender' => $row['gender'],
-                    'department' => $row['department'],
-                    'homeroom_class' => $row['homeroom_class'],
-                    'email' => $row['email'],
-                    'phone' => $row['phone'],
-                    'avatar' => '',
-                    'status' => $row['status'],
-                ]);
-                Admin::createAccountWithPdo($pdo, $row['teacher_code'], '123456', $row['full_name'], 'teacher');
-                $existingTeachers[$teacherCodeKey] = true;
-                $existingLogins[$teacherCodeKey] = true;
-                $inserted++;
+                try {
+                    Teacher::insertWithPdo($pdo, [
+                        'teacher_code' => $row['teacher_code'],
+                        'full_name' => $row['full_name'],
+                        'date_of_birth' => $row['date_of_birth'],
+                        'gender' => $row['gender'],
+                        'department' => '',
+                        'homeroom_class' => $this->normalizeOptionalHomeroomClass($row['homeroom_class'], $pdo),
+                        'email' => $row['email'],
+                        'phone' => $row['phone'],
+                        'avatar' => '',
+                        'status' => $row['status'],
+                    ]);
+                    Admin::createAccountWithPdo($pdo, $row['teacher_code'], '123456', $row['full_name'], 'teacher');
+                    $existingTeachers[$teacherCodeKey] = true;
+                    $existingLogins[$teacherCodeKey] = true;
+                    if ($emailKey !== '') {
+                        $existingEmails[$emailKey] = true;
+                    }
+                    $inserted++;
+                } catch (PDOException $e) {
+                    $message = (string)$e->getMessage();
+                    if (strpos($message, 'UNIQUE constraint failed: GiangVien.Email') !== false) {
+                        $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Email da ton tai'];
+                        continue;
+                    }
+                    if (strpos($message, 'UNIQUE constraint failed: GiangVien.MaGV') !== false) {
+                        $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Ma giao vien da ton tai'];
+                        continue;
+                    }
+                    if (strpos($message, 'UNIQUE constraint failed: TaiKhoan.LoginId') !== false) {
+                        $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Login da ton tai'];
+                        continue;
+                    }
+                    throw $e;
+                }
             }
 
             $pdo->commit();
@@ -652,15 +694,16 @@ class TeacherController
         }
 
         $payload = $_POST;
+        $pdo = get_db_connection();
+        HomeroomClass::ensureSchema($pdo);
+        $homeroomClass = $this->normalizeOptionalHomeroomClass((string)($payload['homeroom_class'] ?? ($current['homeroom_class'] ?? '')), $pdo);
         $fullName = trim((string)($payload['full_name'] ?? $current['full_name']));
-        $department = trim((string)($payload['department'] ?? $current['department']));
         $email = trim((string)($payload['email'] ?? ($current['email'] ?? '')));
         $gender = $this->normalizeGender((string)($payload['gender'] ?? ($current['gender'] ?? '')));
         $status = $this->normalizeStatus((string)($payload['status'] ?? ($current['status'] ?? '')));
 
         $errors = [];
         if ($fullName === '') $errors['full_name'] = 'Hay nhap ho ten.';
-        if ($department === '') $errors['department'] = 'Hay nhap khoa/bo mon.';
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Email khong hop le.';
         if ($gender === '') $errors['gender'] = 'Gioi tinh khong hop le.';
         if ($status === '') $errors['status'] = 'Trang thai khong hop le.';
@@ -735,8 +778,8 @@ class TeacherController
             'full_name' => $fullName,
             'date_of_birth' => trim((string)($payload['date_of_birth'] ?? ($current['date_of_birth'] ?? ''))),
             'gender' => $gender,
-            'department' => $department,
-            'homeroom_class' => trim((string)($payload['homeroom_class'] ?? ($current['homeroom_class'] ?? ''))),
+                'department' => '',
+                    'homeroom_class' => $homeroomClass,
             'email' => $email,
             'phone' => trim((string)($payload['phone'] ?? ($current['phone'] ?? ''))),
             'avatar' => $avatar,
@@ -798,7 +841,6 @@ class TeacherController
         $oldCode = trim((string)($payload['old_teacher_code'] ?? ''));
         $newCode = trim((string)($payload['teacher_code'] ?? ''));
         $fullName = trim((string)($payload['full_name'] ?? ''));
-        $department = trim((string)($payload['department'] ?? ''));
         $email = trim((string)($payload['email'] ?? ''));
         $gender = $this->normalizeGender((string)($payload['gender'] ?? ''));
         $status = $this->normalizeStatus((string)($payload['status'] ?? ''));
@@ -810,7 +852,6 @@ class TeacherController
         if ($oldCode === '') $errors['old_teacher_code'] = 'Thiếu mã giáo viên gốc.';
         if ($newCode === '') $errors['teacher_code'] = 'Hãy nhập mã giáo viên.';
         if ($fullName === '') $errors['full_name'] = 'Hãy nhập họ tên.';
-        if ($department === '') $errors['department'] = 'Hãy nhập khoa/bộ môn.';
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Email không hợp lệ.';
         if ($gender === '') $errors['gender'] = 'Giới tính không hợp lệ.';
         if ($status === '') $errors['status'] = 'Trạng thái không hợp lệ.';
@@ -823,12 +864,15 @@ class TeacherController
             $pdo = get_db_connection();
             Teacher::ensureSchema($pdo);
             Admin::ensureSchema($pdo);
+            HomeroomClass::ensureSchema($pdo);
             $stmt = $pdo->prepare('SELECT * FROM GiangVien WHERE MaGV = :code LIMIT 1');
             $stmt->execute([':code' => $oldCode]);
             if (!$stmt->fetch()) {
                 jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy giáo viên.'], 404);
                 return;
             }
+
+            $homeroomClass = $this->normalizeOptionalHomeroomClass($homeroomClass, $pdo);
 
             $pdo->beginTransaction();
             if (strtolower($newCode) !== strtolower($oldCode)) {
@@ -865,7 +909,7 @@ class TeacherController
                 ':full_name' => $fullName,
                 ':date_of_birth' => $dateOfBirth ?: null,
                 ':gender' => $gender,
-                ':homeroom_class' => $homeroomClass ?: null,
+                ':homeroom_class' => $homeroomClass !== '' ? $homeroomClass : null,
                 ':email' => $email ?: null,
                 ':phone' => $phone ?: null,
                 ':status' => $status,
@@ -930,8 +974,11 @@ class TeacherController
             $pdo->beginTransaction();
             $stmt = $pdo->prepare('DELETE FROM GiangVien WHERE MaGV = :code');
             $stmt->execute([':code' => $teacherCode]);
-            $stmt = $pdo->prepare('DELETE FROM TaiKhoan WHERE lower(LoginId)=lower(:code) AND LoaiTaiKhoan = "teacher"');
-            $stmt->execute([':code' => $teacherCode]);
+            $stmt = $pdo->prepare('DELETE FROM TaiKhoan WHERE lower(LoginId)=lower(:code) AND lower(LoaiTaiKhoan)=:account_type');
+            $stmt->execute([
+                ':code' => $teacherCode,
+                ':account_type' => 'teacher',
+            ]);
             $pdo->commit();
 
             jsonResponse(['status' => 'success', 'message' => 'Đã xóa giáo viên và tài khoản liên quan.']);

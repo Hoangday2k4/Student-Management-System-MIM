@@ -1,7 +1,7 @@
 ﻿<script setup>
 import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FACULTY_OPTIONS } from '@/constants/options'
+import { listSemesters } from '@/services/semesterService'
 
 const route = useRoute()
 const router = useRouter()
@@ -11,6 +11,9 @@ const loading = ref(true)
 const submitting = ref(false)
 const serverError = ref('')
 const saveResult = ref(null)
+const semesterOptions = ref([])
+const teacherOptions = ref([])
+const teacherLoadError = ref('')
 
 const form = reactive({
   id: 0,
@@ -18,10 +21,10 @@ const form = reactive({
   course_name: '',
   credits: '',
   teacher_code: '',
-  department: '',
   schedule: '',
   classroom: '',
   max_students: '',
+  ma_hoc_ky: '',
 })
 
 const fileName = ref('')
@@ -37,17 +40,43 @@ const errors = reactive({
   max_students: '',
   schedule: '',
   classroom: '',
+  ma_hoc_ky: '',
 })
+
+async function loadSemesters() {
+  try {
+    const items = await listSemesters({ include_inactive: 'false' })
+    semesterOptions.value = Array.isArray(items) ? items : []
+  } catch (error) {
+    semesterOptions.value = []
+  }
+}
+loadSemesters()
+
+async function loadTeachers() {
+  teacherLoadError.value = ''
+  try {
+    const res = await fetch('/api/teacher.php')
+    if (res.status === 401) {
+      router.replace('/login')
+      return
+    }
+    const data = await res.json().catch(() => ([]))
+    teacherOptions.value = Array.isArray(data) ? data : []
+  } catch (error) {
+    teacherOptions.value = []
+    teacherLoadError.value = 'Khong tai duoc danh sach giao vien.'
+  }
+}
+loadTeachers()
 
 const searchQuery = computed(() => {
   const q = {}
   const keyword = String(route.query.keyword || '').trim()
-  const department = String(route.query.department || '').trim()
   const teacherCode = String(route.query.teacher_code || '').trim()
   const searched = String(route.query.searched || '0')
 
   if (keyword) q.keyword = keyword
-  if (department) q.department = department
   if (teacherCode) q.teacher_code = teacherCode
   q.searched = searched === '1' ? '1' : '0'
   return q
@@ -76,8 +105,25 @@ function resetErrors() {
   errors.max_students = ''
   errors.schedule = ''
   errors.classroom = ''
+  errors.ma_hoc_ky = ''
   serverError.value = ''
 }
+
+function getTeacherLabel(teacher) {
+  const code = String(teacher?.teacher_code || '').trim()
+  const name = String(teacher?.full_name || '').trim()
+  if (!code && !name) return ''
+  if (!name) return code
+  return `${code} - ${name}`
+}
+
+const teacherOptionsWithCurrent = computed(() => {
+  const currentCode = asText(form.teacher_code)
+  if (!currentCode) return teacherOptions.value
+  const exists = teacherOptions.value.some((t) => String(t?.teacher_code || '').trim() === currentCode)
+  if (exists) return teacherOptions.value
+  return [{ teacher_code: currentCode, full_name: 'Giang vien hien tai' }, ...teacherOptions.value]
+})
 
 function validateForm() {
   resetErrors()
@@ -91,16 +137,16 @@ function validateForm() {
     errors.course_name = 'Hãy nhập tên môn học.'
     ok = false
   }
-  if (!asText(form.teacher_code)) {
-    errors.teacher_code = 'Hãy nhập mã giáo viên.'
-    ok = false
-  }
   if (form.credits !== '' && (!/^\d+$/.test(form.credits) || Number(form.credits) <= 0)) {
     errors.credits = 'Số tín chỉ phải là số nguyên dương.'
     ok = false
   }
   if (form.max_students !== '' && (!/^\d+$/.test(form.max_students) || Number(form.max_students) <= 0)) {
     errors.max_students = 'Số lượng tối đa phải là số nguyên dương.'
+    ok = false
+  }
+  if (!asText(form.ma_hoc_ky)) {
+    errors.ma_hoc_ky = 'Hãy chọn học kỳ.'
     ok = false
   }
 
@@ -291,7 +337,7 @@ async function loadDetail() {
       return
     }
 
-    const res = await fetch(`/api/courses/detail?id=${id}`)
+    const res = await fetch(`/api/course_detail.php?id=${id}`)
     const payload = await res.json().catch(() => ({}))
     if (!res.ok || payload.status !== 'success') {
       serverError.value = payload.message || 'Không thể tải môn học.'
@@ -304,10 +350,10 @@ async function loadDetail() {
     form.course_name = data.course_name || ''
     form.credits = data.credits ?? ''
     form.teacher_code = data.teacher_code || ''
-    form.department = data.department || ''
     form.schedule = data.schedule || ''
     form.classroom = data.classroom || ''
     form.max_students = data.max_students ?? ''
+    form.ma_hoc_ky = data.ma_hoc_ky || ''
   } catch (error) {
     serverError.value = 'Không kết nối được máy chủ.'
   } finally {
@@ -326,15 +372,15 @@ async function submitForm() {
     body.append('course_name', asText(form.course_name))
     body.append('credits', asText(form.credits))
     body.append('teacher_code', asText(form.teacher_code))
-    body.append('department', asText(form.department))
     body.append('schedule', asText(form.schedule))
     body.append('classroom', asText(form.classroom))
     body.append('max_students', asText(form.max_students))
+    body.append('ma_hoc_ky', asText(form.ma_hoc_ky))
     if (studentFile.value) {
       body.append('student_file', studentFile.value)
     }
 
-    const res = await fetch('/api/courses/detail', {
+    const res = await fetch('/api/course_detail.php', {
       method: 'POST',
       body,
     })
@@ -355,7 +401,8 @@ async function submitForm() {
       errors.max_students = fields.max_students || ''
       errors.schedule = fields.schedule || ''
       errors.classroom = fields.classroom || ''
-      serverError.value = payload.message || 'Không thể cập nhật môn học.'
+      errors.ma_hoc_ky = fields.ma_hoc_ky || ''
+      serverError.value = payload.detail ? `${payload.message} (${payload.detail})` : (payload.message || 'Không thể cập nhật môn học.')
       step.value = 'input'
       return
     }
@@ -411,17 +458,28 @@ async function submitForm() {
           <p v-if="errors.credits" class="error">{{ errors.credits }}</p>
         </div>
 
-        <label>Mã giáo viên *</label>
+        <label>Mã giáo viên (tùy chọn)</label>
         <div>
-          <input v-model="form.teacher_code" type="text" maxlength="30" />
+          <select v-model="form.teacher_code">
+            <option value="">-- Không gán giáo viên --</option>
+            <option v-for="teacher in teacherOptionsWithCurrent" :key="teacher.teacher_code" :value="teacher.teacher_code">
+              {{ getTeacherLabel(teacher) }}
+            </option>
+          </select>
           <p v-if="errors.teacher_code" class="error">{{ errors.teacher_code }}</p>
+          <p v-if="teacherLoadError" class="error">{{ teacherLoadError }}</p>
         </div>
 
-        <label>Khoa/Bộ môn</label>
-        <select v-model="form.department">
-          <option value="">-- Chọn khoa/bộ môn --</option>
-          <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
-        </select>
+        <label>Học kỳ *</label>
+        <div>
+          <select v-model="form.ma_hoc_ky">
+            <option value="">-- Chọn học kỳ --</option>
+            <option v-for="semester in semesterOptions" :key="semester.ma_hoc_ky" :value="semester.ma_hoc_ky">
+              {{ semester.ma_hoc_ky }} - {{ semester.ten_hoc_ky }} - {{ semester.nam_hoc }}
+            </option>
+          </select>
+          <p v-if="errors.ma_hoc_ky" class="error">{{ errors.ma_hoc_ky }}</p>
+        </div>
 
         <label>Lịch học</label>
         <div>
@@ -461,8 +519,8 @@ async function submitForm() {
           <span class="label">Mã môn học</span><span>{{ form.course_code }}</span>
           <span class="label">Tên môn học</span><span>{{ form.course_name }}</span>
           <span class="label">Số tín chỉ</span><span>{{ form.credits || '-' }}</span>
-          <span class="label">Mã giáo viên</span><span>{{ form.teacher_code }}</span>
-          <span class="label">Khoa/Bộ môn</span><span>{{ form.department || '-' }}</span>
+          <span class="label">Mã giáo viên</span><span>{{ form.teacher_code || '-' }}</span>
+          <span class="label">Học kỳ</span><span>{{ form.ma_hoc_ky || '-' }}</span>
           <span class="label">Lịch học</span><span>{{ form.schedule || '-' }}</span>
           <span class="label">Phòng học</span><span>{{ form.classroom || '-' }}</span>
           <span class="label">Số lượng tối đa</span><span>{{ form.max_students || '-' }}</span>

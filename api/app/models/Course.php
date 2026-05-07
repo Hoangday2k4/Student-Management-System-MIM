@@ -59,7 +59,12 @@ class Course
     {
         $name = trim((string)$department);
         if ($name === '') {
-            return null;
+            $fallbackCode = 'NGANH00';
+            $pdo->prepare('INSERT OR IGNORE INTO Nganh (MaNganh, TenNganh, MoTa) VALUES (:code, :name, NULL)')->execute([
+                ':code' => $fallbackCode,
+                ':name' => 'Chua xac dinh',
+            ]);
+            return $fallbackCode;
         }
         $stmt = $pdo->prepare('SELECT MaNganh FROM Nganh WHERE lower(TenNganh)=lower(:name) OR lower(MaNganh)=lower(:name) LIMIT 1');
         $stmt->execute([':name' => $name]);
@@ -107,6 +112,21 @@ class Course
             $pdo = get_db_connection();
         }
         $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS HocKy (
+                MaHocKy TEXT PRIMARY KEY,
+                TenHocKy TEXT NOT NULL,
+                NamHoc TEXT NOT NULL,
+                Ky INTEGER NOT NULL,
+                TrangThai TEXT NOT NULL DEFAULT "ACTIVE",
+                IsCurrent INTEGER NOT NULL DEFAULT 0,
+                CreatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UpdatedAt TEXT,
+                DeletedAt TEXT
+            )'
+        );
+        $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS ux_hocky_namhoc_ky ON HocKy(NamHoc, Ky)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_hocky_trangthai ON HocKy(TrangThai)');
+        $pdo->exec(
             'CREATE TABLE IF NOT EXISTS Nganh (
                 MaNganh TEXT PRIMARY KEY,
                 TenNganh TEXT NOT NULL,
@@ -139,9 +159,9 @@ class Course
                 MaLHP TEXT PRIMARY KEY,
                 MaMon TEXT,
                 MaGV TEXT,
-                HocKy INTEGER,
-                NamHoc TEXT,
-                SoLuongToiDa INTEGER
+                MaHocKy TEXT,
+                SoLuongToiDa INTEGER,
+                TrangThaiDangKy TEXT DEFAULT "DRAFT"
             )'
         );
         $pdo->exec(
@@ -164,6 +184,7 @@ class Course
                 UNIQUE(MaSV, MaLHP)
             )'
         );
+        $pdo->exec('CREATE UNIQUE INDEX IF NOT EXISTS ux_ketquahoctap_masv_malhp ON KetQuaHocTap(MaSV, MaLHP)');
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS SinhVien (
                 MaSV TEXT PRIMARY KEY,
@@ -223,7 +244,68 @@ class Course
 
         $columns = $pdo->query('PRAGMA table_info(LopHocPhan)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $names = [];
-        foreach ($columns as $c) $names[(string)$c['name']] = true;
+        $needsRelaxMaGv = false;
+        foreach ($columns as $c) {
+            $colName = (string)($c['name'] ?? '');
+            $names[$colName] = true;
+            if (strcasecmp($colName, 'MaGV') === 0 && (int)($c['notnull'] ?? 0) === 1) {
+                $needsRelaxMaGv = true;
+            }
+        }
+
+        if ($needsRelaxMaGv) {
+            $pdo->exec(
+                'CREATE TABLE IF NOT EXISTS LopHocPhan_new (
+                    MaLHP TEXT PRIMARY KEY,
+                    MaMon TEXT,
+                    MaGV TEXT,
+                    MaHocKy TEXT,
+                    SoLuongToiDa INTEGER,
+                    TrangThaiDangKy TEXT DEFAULT "DRAFT",
+                    TrongSoCC REAL DEFAULT 0,
+                    TrongSoGK REAL DEFAULT 0,
+                    TrongSoCK REAL DEFAULT 0,
+                    CreatedAt TEXT
+                )'
+            );
+
+            $targetCols = ['MaLHP', 'MaMon', 'MaGV', 'MaHocKy', 'SoLuongToiDa', 'TrangThaiDangKy', 'TrongSoCC', 'TrongSoGK', 'TrongSoCK', 'CreatedAt'];
+            $selectParts = [];
+            foreach ($targetCols as $col) {
+                if (isset($names[$col])) {
+                    $selectParts[] = $col;
+                    continue;
+                }
+                if ($col === 'TrangThaiDangKy') {
+                    $selectParts[] = '"DRAFT"';
+                } elseif (in_array($col, ['TrongSoCC', 'TrongSoGK', 'TrongSoCK'], true)) {
+                    $selectParts[] = '0';
+                } elseif ($col === 'CreatedAt') {
+                    $selectParts[] = "datetime('now', 'localtime')";
+                } else {
+                    $selectParts[] = 'NULL';
+                }
+            }
+
+            $pdo->exec(
+                'INSERT INTO LopHocPhan_new (' . implode(', ', $targetCols) . ')
+                 SELECT ' . implode(', ', $selectParts) . ' FROM LopHocPhan'
+            );
+            $pdo->exec('DROP TABLE LopHocPhan');
+            $pdo->exec('ALTER TABLE LopHocPhan_new RENAME TO LopHocPhan');
+
+            $columns = $pdo->query('PRAGMA table_info(LopHocPhan)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $names = [];
+            foreach ($columns as $c) {
+                $names[(string)($c['name'] ?? '')] = true;
+            }
+        }
+        if (!isset($names['MaHocKy'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN MaHocKy TEXT');
+        }
+        if (!isset($names['TrangThaiDangKy'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrangThaiDangKy TEXT DEFAULT "DRAFT"');
+        }
         if (!isset($names['TrongSoCC'])) $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoCC REAL DEFAULT 0');
         if (!isset($names['TrongSoGK'])) $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoGK REAL DEFAULT 0');
         if (!isset($names['TrongSoCK'])) $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoCK REAL DEFAULT 0');
@@ -233,10 +315,50 @@ class Course
             $pdo->exec("UPDATE LopHocPhan SET CreatedAt = datetime('now', 'localtime') WHERE CreatedAt IS NULL OR trim(CreatedAt) = ''");
         }
 
-        $rows = $pdo->query('SELECT MaLHP FROM LopHocPhan')->fetchAll(PDO::FETCH_COLUMN) ?: [];
-        foreach ($rows as $maLHP) {
-            self::ensureMapForLhp($pdo, (string)$maLHP);
+        if (isset($names['HocKy']) && isset($names['NamHoc'])) {
+            $pdo->exec(
+                "INSERT OR IGNORE INTO HocKy (MaHocKy, TenHocKy, NamHoc, Ky, TrangThai, IsCurrent, CreatedAt)
+                 SELECT
+                    CASE
+                        WHEN NamHoc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9]' AND HocKy IN (1,2,3)
+                            THEN substr(NamHoc, 3, 2) || CAST(HocKy AS TEXT)
+                        ELSE 'TMP001'
+                    END AS MaHocKy,
+                    'HK' || CASE WHEN HocKy IN (1,2,3) THEN CAST(HocKy AS TEXT) ELSE '1' END AS TenHocKy,
+                    COALESCE(NULLIF(trim(NamHoc), ''), '2024-2025') AS NamHoc,
+                    CASE WHEN HocKy IN (1,2,3) THEN HocKy ELSE 1 END AS Ky,
+                    'ACTIVE',
+                    0,
+                    datetime('now', 'localtime')
+                 FROM LopHocPhan"
+            );
+
+            $pdo->exec(
+                "UPDATE LopHocPhan
+                 SET MaHocKy = (
+                    CASE
+                        WHEN NamHoc GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9]' AND HocKy IN (1,2,3)
+                            THEN substr(NamHoc, 3, 2) || CAST(HocKy AS TEXT)
+                        ELSE 'TMP001'
+                    END
+                 )
+                 WHERE MaHocKy IS NULL OR trim(MaHocKy) = ''"
+            );
         }
+
+        $pdo->exec(
+            "INSERT OR IGNORE INTO HocKy (MaHocKy, TenHocKy, NamHoc, Ky, TrangThai, IsCurrent, CreatedAt)
+             VALUES ('TMP001', 'HK1', '2024-2025', 1, 'ACTIVE', 1, datetime('now', 'localtime'))"
+        );
+        $pdo->exec("UPDATE LopHocPhan SET MaHocKy = 'TMP001' WHERE MaHocKy IS NULL OR trim(MaHocKy) = ''");
+        $pdo->exec("UPDATE LopHocPhan SET TrangThaiDangKy = 'DRAFT' WHERE TrangThaiDangKy IS NULL OR trim(TrangThaiDangKy) = ''");
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_lophocphan_mahocky ON LopHocPhan(MaHocKy)');
+        $pdo->exec('CREATE INDEX IF NOT EXISTS idx_lophocphan_trangthai_dk ON LopHocPhan(TrangThaiDangKy)');
+
+        $pdo->exec(
+            'INSERT OR IGNORE INTO LopHocPhanMap (MaLHP)
+             SELECT MaLHP FROM LopHocPhan'
+        );
     }
 
     public static function insertWithPdo(PDO $pdo, array $data): int
@@ -271,16 +393,18 @@ class Course
 
         $stmt = $pdo->prepare(
             'INSERT INTO LopHocPhan (
-                MaLHP, MaMon, MaGV, HocKy, NamHoc, SoLuongToiDa, TrongSoCC, TrongSoGK, TrongSoCK, CreatedAt
+                MaLHP, MaMon, MaGV, MaHocKy, SoLuongToiDa, TrangThaiDangKy, TrongSoCC, TrongSoGK, TrongSoCK, CreatedAt
             ) VALUES (
-                :ma_lhp, :ma_mon, :ma_gv, NULL, NULL, :max, 0, 0, 0, CURRENT_TIMESTAMP
+                :ma_lhp, :ma_mon, :ma_gv, :ma_hoc_ky, :max, :trang_thai_dk, 0, 0, 0, CURRENT_TIMESTAMP
             )'
         );
         $stmt->execute([
             ':ma_lhp' => $maLHP,
             ':ma_mon' => $maMon,
             ':ma_gv' => $data['teacher_code'] ?: null,
+            ':ma_hoc_ky' => trim((string)($data['ma_hoc_ky'] ?? '')),
             ':max' => $data['max_students'] !== null ? (int)$data['max_students'] : null,
+            ':trang_thai_dk' => trim((string)($data['enrollment_status'] ?? 'DRAFT')),
         ]);
 
         $schedules = self::splitValues((string)($data['schedule'] ?? ''));
@@ -332,13 +456,17 @@ class Course
             'UPDATE LopHocPhan
              SET MaMon = :ma_mon,
                  MaGV = :ma_gv,
-                 SoLuongToiDa = :max
+                 MaHocKy = :ma_hoc_ky,
+                 SoLuongToiDa = :max,
+                 TrangThaiDangKy = :trang_thai_dk
              WHERE MaLHP = :ma_lhp'
         );
         $stmt->execute([
             ':ma_mon' => $newMaMon,
             ':ma_gv' => $data['teacher_code'] ?: null,
+            ':ma_hoc_ky' => trim((string)($data['ma_hoc_ky'] ?? '')),
             ':max' => $data['max_students'] !== null ? (int)$data['max_students'] : null,
+            ':trang_thai_dk' => trim((string)($data['enrollment_status'] ?? 'DRAFT')),
             ':ma_lhp' => $maLHP,
         ]);
 
@@ -438,12 +566,14 @@ class Course
         $maLHP = self::getMaLhpByLegacyId($pdo, $id);
         if (!$maLHP) return false;
         $stmt = $pdo->prepare(
-            'SELECT l.MaLHP, l.MaMon, l.MaGV, l.SoLuongToiDa, l.TrongSoCC, l.TrongSoGK, l.TrongSoCK, l.CreatedAt,
-                    m.TenMon, m.SoTinChi, n.TenNganh, g.HoTen AS teacher_name
+            'SELECT l.MaLHP, l.MaMon, l.MaGV, l.MaHocKy, l.SoLuongToiDa, l.TrangThaiDangKy, l.TrongSoCC, l.TrongSoGK, l.TrongSoCK, l.CreatedAt,
+                m.TenMon, m.SoTinChi, n.TenNganh, g.HoTen AS teacher_name,
+                h.TenHocKy, h.NamHoc, h.Ky
              FROM LopHocPhan l
              LEFT JOIN MonHoc m ON m.MaMon = l.MaMon
              LEFT JOIN Nganh n ON n.MaNganh = m.MaNganh
              LEFT JOIN GiangVien g ON g.MaGV = l.MaGV
+             LEFT JOIN HocKy h ON h.MaHocKy = l.MaHocKy
              WHERE l.MaLHP = :ma_lhp
              LIMIT 1'
         );
@@ -468,6 +598,14 @@ class Course
             'weight_ck' => (float)($row['TrongSoCK'] ?? 0),
             'created_at' => $row['CreatedAt'] ?? '',
             'teacher_name' => $row['teacher_name'] ?? '',
+            'ma_hoc_ky' => $row['MaHocKy'] ?? '',
+            'semester' => [
+                'ma_hoc_ky' => $row['MaHocKy'] ?? '',
+                'ten_hoc_ky' => $row['TenHocKy'] ?? '',
+                'nam_hoc' => $row['NamHoc'] ?? '',
+                'ky' => isset($row['Ky']) ? (int)$row['Ky'] : null,
+            ],
+            'enrollment_status' => $row['TrangThaiDangKy'] ?? 'DRAFT',
             'enrolled_count' => (int)$countStmt->fetchColumn(),
         ];
     }
@@ -558,15 +696,21 @@ class Course
         }
     }
 
-    public static function searchForStaff(array $filters = []): array
+    public static function searchForStaff(array $filters = [], ?PDO $pdo = null): array
     {
-        self::ensureSchema();
-        $pdo = get_db_connection();
-        $sql = 'SELECT m.MaMon, m.TenMon, m.SoTinChi, n.TenNganh, l.MaLHP, l.MaGV, l.SoLuongToiDa, l.CreatedAt, g.HoTen AS teacher_name
+        if ($pdo) {
+            self::ensureSchema($pdo);
+        } else {
+            self::ensureSchema();
+            $pdo = get_db_connection();
+        }
+        $sql = 'SELECT m.MaMon, m.TenMon, m.SoTinChi, n.TenNganh, l.MaLHP, l.MaGV, l.MaHocKy, l.SoLuongToiDa, l.TrangThaiDangKy, l.CreatedAt, g.HoTen AS teacher_name,
+                   h.TenHocKy, h.NamHoc, h.Ky
                 FROM LopHocPhan l
                 INNER JOIN MonHoc m ON m.MaMon = l.MaMon
                 LEFT JOIN Nganh n ON n.MaNganh = m.MaNganh
                 LEFT JOIN GiangVien g ON g.MaGV = l.MaGV
+            LEFT JOIN HocKy h ON h.MaHocKy = l.MaHocKy
                 WHERE 1=1';
         $params = [];
         if (!empty($filters['keyword'])) {
@@ -585,6 +729,10 @@ class Course
         if (!empty($filters['teacher_code'])) {
             $sql .= ' AND lower(IFNULL(l.MaGV,"")) LIKE :teacher_code';
             $params[':teacher_code'] = '%' . self::lowerText((string)$filters['teacher_code']) . '%';
+        }
+        if (!empty($filters['ma_hoc_ky'])) {
+            $sql .= ' AND lower(IFNULL(l.MaHocKy,"")) = lower(:ma_hoc_ky)';
+            $params[':ma_hoc_ky'] = trim((string)$filters['ma_hoc_ky']);
         }
         $sql .= ' ORDER BY lower(IFNULL(n.TenNganh,"")) ASC, CAST(substr(m.MaMon,4) AS INTEGER) ASC, m.MaMon ASC LIMIT 500';
         $stmt = $pdo->prepare($sql);
@@ -608,18 +756,29 @@ class Course
                 'max_students' => $row['SoLuongToiDa'] !== null ? (int)$row['SoLuongToiDa'] : null,
                 'created_at' => $row['CreatedAt'] ?? '',
                 'teacher_name' => $row['teacher_name'] ?? '',
+                'ma_hoc_ky' => $row['MaHocKy'] ?? '',
+                'semester' => [
+                    'ma_hoc_ky' => $row['MaHocKy'] ?? '',
+                    'ten_hoc_ky' => $row['TenHocKy'] ?? '',
+                    'nam_hoc' => $row['NamHoc'] ?? '',
+                    'ky' => isset($row['Ky']) ? (int)$row['Ky'] : null,
+                ],
+                'enrollment_status' => $row['TrangThaiDangKy'] ?? 'DRAFT',
                 'enrolled_count' => (int)$cst->fetchColumn(),
             ];
         }
         return $out;
     }
 
-    public static function listByTeacherCode(string $teacherCode): array
+    public static function listByTeacherCode(string $teacherCode, array $filters = []): array
     {
-        return self::searchForStaff(['teacher_code' => $teacherCode]);
+        return self::searchForStaff([
+            'teacher_code' => $teacherCode,
+            'ma_hoc_ky' => $filters['ma_hoc_ky'] ?? '',
+        ]);
     }
 
-    public static function listByStudentCode(string $studentCode): array
+    public static function listByStudentCode(string $studentCode, array $filters = []): array
     {
         self::ensureSchema();
         $pdo = get_db_connection();
@@ -627,8 +786,13 @@ class Course
                 FROM KetQuaHocTap k
                 INNER JOIN LopHocPhan l ON l.MaLHP = k.MaLHP
                 WHERE lower(k.MaSV) = lower(:ma_sv)';
+        $params = [':ma_sv' => $studentCode];
+        if (!empty($filters['ma_hoc_ky'])) {
+            $sql .= ' AND lower(IFNULL(l.MaHocKy,"")) = lower(:ma_hoc_ky)';
+            $params[':ma_hoc_ky'] = trim((string)$filters['ma_hoc_ky']);
+        }
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([':ma_sv' => $studentCode]);
+        $stmt->execute($params);
         $lhps = $stmt->fetchAll(PDO::FETCH_COLUMN) ?: [];
         $items = [];
         foreach ($lhps as $maLHP) {
@@ -639,16 +803,59 @@ class Course
         return $items;
     }
 
-    public static function listScoresByStudentCode(string $studentCode): array
+    public static function updateEnrollmentStatusWithPdo(PDO $pdo, int $courseId, string $status): bool
+    {
+        self::ensureSchema($pdo);
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return false;
+        $stmt = $pdo->prepare('UPDATE LopHocPhan SET TrangThaiDangKy = :st WHERE MaLHP = :ma_lhp');
+        $stmt->execute([':st' => $status, ':ma_lhp' => $maLHP]);
+        return $stmt->rowCount() > 0;
+    }
+
+    public static function hasEnrollmentData(int $courseId, ?PDO $pdo = null): bool
+    {
+        if (!$pdo) {
+            $pdo = get_db_connection();
+        }
+        self::ensureSchema($pdo);
+        $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
+        if (!$maLHP) return false;
+
+        $stmt = $pdo->prepare('SELECT COUNT(1) FROM KetQuaHocTap WHERE MaLHP = :ma_lhp');
+        $stmt->execute([':ma_lhp' => $maLHP]);
+        if ((int)$stmt->fetchColumn() > 0) {
+            return true;
+        }
+
+        $tableCheck = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='DangKyHoc' LIMIT 1");
+        $tableCheck->execute();
+        if ($tableCheck->fetchColumn()) {
+            $stmt = $pdo->prepare('SELECT COUNT(1) FROM DangKyHoc WHERE MaLHP = :ma_lhp');
+            $stmt->execute([':ma_lhp' => $maLHP]);
+            if ((int)$stmt->fetchColumn() > 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static function listScoresByStudentCode(string $studentCode, array $filters = []): array
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $stmt = $pdo->prepare(
-            'SELECT k.MaLHP, k.DiemChuyenCan, k.DiemGiuaKy, k.DiemCuoiKy
-             FROM KetQuaHocTap k
-             WHERE lower(k.MaSV) = lower(:ma_sv)'
-        );
-        $stmt->execute([':ma_sv' => $studentCode]);
+        $sql = 'SELECT k.MaLHP, k.DiemChuyenCan, k.DiemGiuaKy, k.DiemCuoiKy
+                FROM KetQuaHocTap k
+                INNER JOIN LopHocPhan l ON l.MaLHP = k.MaLHP
+                WHERE lower(k.MaSV) = lower(:ma_sv)';
+        $params = [':ma_sv' => $studentCode];
+        if (!empty($filters['ma_hoc_ky'])) {
+            $sql .= ' AND lower(IFNULL(l.MaHocKy, "")) = lower(:ma_hoc_ky)';
+            $params[':ma_hoc_ky'] = trim((string)$filters['ma_hoc_ky']);
+        }
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $out = [];
         foreach ($rows as $row) {
@@ -698,5 +905,84 @@ class Course
             'gk' => $row['DiemGiuaKy'] !== null ? (float)$row['DiemGiuaKy'] : null,
             'ck' => $row['DiemCuoiKy'] !== null ? (float)$row['DiemCuoiKy'] : null,
         ];
+    }
+
+    public static function reportFailRateBySemester(string $maHocKy, float $threshold = 4.0): array
+    {
+        self::ensureSchema();
+        $pdo = get_db_connection();
+        $sql =
+            'SELECT l.MaLHP, l.MaMon, m.TenMon,
+                    l.TrongSoCC, l.TrongSoGK, l.TrongSoCK,
+                    k.DiemChuyenCan, k.DiemGiuaKy, k.DiemCuoiKy
+             FROM LopHocPhan l
+             INNER JOIN MonHoc m ON m.MaMon = l.MaMon
+             LEFT JOIN KetQuaHocTap k ON k.MaLHP = l.MaLHP
+             WHERE lower(IFNULL(l.MaHocKy, "")) = lower(:ma_hoc_ky)
+             ORDER BY l.MaLHP ASC';
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([':ma_hoc_ky' => $maHocKy]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+        $map = [];
+        foreach ($rows as $row) {
+            $maLHP = (string)($row['MaLHP'] ?? '');
+            if ($maLHP === '') continue;
+
+            if (!isset($map[$maLHP])) {
+                $map[$maLHP] = [
+                    'ma_lhp' => $maLHP,
+                    'ma_mon' => (string)($row['MaMon'] ?? ''),
+                    'ten_mon' => (string)($row['TenMon'] ?? ''),
+                    'so_sv' => 0,
+                    'so_rot' => 0,
+                ];
+            }
+
+            $cc = $row['DiemChuyenCan'];
+            $gk = $row['DiemGiuaKy'];
+            $ck = $row['DiemCuoiKy'];
+            if ($cc === null && $gk === null && $ck === null) {
+                continue;
+            }
+
+            $wCc = (float)($row['TrongSoCC'] ?? 0);
+            $wGk = (float)($row['TrongSoGK'] ?? 0);
+            $wCk = (float)($row['TrongSoCK'] ?? 0);
+            $sumW = $wCc + $wGk + $wCk;
+            if ($sumW <= 0) {
+                $wCc = 1;
+                $wGk = 1;
+                $wCk = 1;
+                $sumW = 3;
+            }
+
+            $ccVal = $cc === null ? 0.0 : (float)$cc;
+            $gkVal = $gk === null ? 0.0 : (float)$gk;
+            $ckVal = $ck === null ? 0.0 : (float)$ck;
+            $total = ($ccVal * $wCc + $gkVal * $wGk + $ckVal * $wCk) / $sumW;
+
+            $map[$maLHP]['so_sv']++;
+            if ($total < $threshold) {
+                $map[$maLHP]['so_rot']++;
+            }
+        }
+
+        $items = array_values($map);
+        foreach ($items as &$item) {
+            $soSv = (int)$item['so_sv'];
+            $soRot = (int)$item['so_rot'];
+            $item['ty_le_rot'] = $soSv > 0 ? round(($soRot / $soSv) * 100, 2) : 0.0;
+        }
+        unset($item);
+
+        usort($items, static function (array $a, array $b): int {
+            $rateCompare = ((float)$b['ty_le_rot']) <=> ((float)$a['ty_le_rot']);
+            if ($rateCompare !== 0) return $rateCompare;
+            return strcmp((string)$a['ma_lhp'], (string)$b['ma_lhp']);
+        });
+
+        return $items;
     }
 }

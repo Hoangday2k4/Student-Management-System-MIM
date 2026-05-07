@@ -1,7 +1,6 @@
 ﻿<script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { FACULTY_OPTIONS } from '@/constants/options'
 
 const router = useRouter()
 const step = ref('input') // input | confirm | done | bulk-confirm | bulk-done
@@ -20,7 +19,6 @@ const form = reactive({
   full_name: '',
   date_of_birth: '',
   gender: 'Nam',
-  department: FACULTY_OPTIONS[0],
   homeroom_class: '',
   email: '',
   phone: '',
@@ -30,7 +28,6 @@ const form = reactive({
 const errors = reactive({
   teacher_code: '',
   full_name: '',
-  department: '',
   email: '',
 })
 
@@ -52,7 +49,6 @@ onMounted(async () => {
 function resetErrors() {
   errors.teacher_code = ''
   errors.full_name = ''
-  errors.department = ''
   errors.email = ''
 }
 
@@ -65,10 +61,6 @@ function validate() {
   }
   if (!form.full_name.trim()) {
     errors.full_name = 'Hãy nhập họ tên.'
-    ok = false
-  }
-  if (!form.department.trim()) {
-    errors.department = 'Hãy nhập khoa/bộ môn.'
     ok = false
   }
   if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
@@ -180,14 +172,13 @@ async function submitForm() {
   saving.value = true
 
   try {
-    const res = await fetch('/api/teachers', {
+    const res = await fetch('/api/teacher.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...form,
         teacher_code: form.teacher_code.trim(),
         full_name: form.full_name.trim(),
-        department: form.department.trim(),
         homeroom_class: form.homeroom_class.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
@@ -265,14 +256,6 @@ async function submitForm() {
             <option value="Nữ">Nữ</option>
           </select>
 
-          <label for="department">Khoa/Bộ môn *</label>
-          <div>
-            <select id="department" v-model="form.department">
-              <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
-            </select>
-            <p v-if="errors.department" class="error">{{ errors.department }}</p>
-          </div>
-
           <label for="email">Email</label>
           <div>
             <input id="email" v-model="form.email" type="email" maxlength="120" />
@@ -296,7 +279,7 @@ async function submitForm() {
         <p v-if="serverMessage" class="error">{{ serverMessage }}</p>
         <p class="import-hint">
           Cột mặc định file import:
-          <b>MSGV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Khoa/Bộ môn</b>, <b>Email</b>, <b>Lớp phụ trách</b>, <b>SĐT</b>, <b>Trạng thái</b>.
+          <b>MSGV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Email</b>, <b>Lớp phụ trách</b>, <b>SĐT</b>, <b>Trạng thái</b>.
         </p>
         <div class="actions">
           <button type="submit" class="btn-primary">Xác nhận</button>
@@ -321,7 +304,6 @@ async function submitForm() {
           <span class="label">Họ tên</span><span>{{ form.full_name }}</span>
           <span class="label">Ngày sinh</span><span>{{ form.date_of_birth || '-' }}</span>
           <span class="label">Giới tính</span><span>{{ form.gender }}</span>
-          <span class="label">Khoa/Bộ môn</span><span>{{ form.department }}</span>
           <span class="label">Email</span><span>{{ form.email || '-' }}</span>
           <span class="label">Lớp phụ trách</span><span>{{ form.homeroom_class || '-' }}</span>
           <span class="label">Số điện thoại</span><span>{{ form.phone || '-' }}</span>
@@ -350,7 +332,6 @@ async function submitForm() {
                 <th>Họ tên</th>
                 <th>Ngày sinh</th>
                 <th>Giới tính</th>
-                <th>Khoa/Bộ môn</th>
                 <th>Email</th>
                 <th>Lớp phụ trách</th>
                 <th>SĐT</th>
@@ -363,7 +344,6 @@ async function submitForm() {
                 <td>{{ row.full_name }}</td>
                 <td>{{ row.date_of_birth || '-' }}</td>
                 <td>{{ row.gender || '-' }}</td>
-                <td>{{ row.department || '-' }}</td>
                 <td>{{ row.email || '-' }}</td>
                 <td>{{ row.homeroom_class || '-' }}</td>
                 <td>{{ row.phone || '-' }}</td>

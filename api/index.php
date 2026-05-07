@@ -26,6 +26,13 @@ if ($base !== '') {
     $uri = preg_replace('#^' . preg_quote($base) . '#', '', $uri);
 }
 
+// Support deployments/proxies that forward paths with an /api prefix.
+if (strpos($uri, '/api/') === 0) {
+    $uri = substr($uri, 4);
+} elseif ($uri === '/api') {
+    $uri = '/';
+}
+
 // Simple dispatch: look for exact match, then method
 
 if (isset($routes[$method][$uri])) {

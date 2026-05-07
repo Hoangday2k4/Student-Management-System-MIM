@@ -1,7 +1,6 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { FACULTY_OPTIONS } from '@/constants/options'
 
 const router = useRouter()
 const loading = ref(true)
@@ -17,7 +16,6 @@ const form = reactive({
   date_of_birth: '',
   gender: 'Nam',
   class_name: '',
-  faculty: FACULTY_OPTIONS[0],
   email: '',
   phone: '',
   status: 'Đang học',
@@ -95,7 +93,6 @@ onMounted(async () => {
     form.date_of_birth = p.date_of_birth || ''
     form.gender = p.gender || 'Nam'
     form.class_name = p.class_name || ''
-    form.faculty = p.faculty || FACULTY_OPTIONS[0]
     form.email = p.email || ''
     form.phone = p.phone || ''
     form.status = p.status || 'Đang học'
@@ -127,7 +124,6 @@ async function submitForm() {
     body.append('date_of_birth', form.date_of_birth)
     body.append('gender', form.gender)
     body.append('class_name', form.class_name.trim())
-    body.append('faculty', form.faculty)
     body.append('email', form.email.trim())
     body.append('phone', form.phone.trim())
     body.append('status', form.status)
@@ -193,11 +189,6 @@ async function submitForm() {
           <p v-if="errors.class_name" class="error">{{ errors.class_name }}</p>
         </div>
 
-        <label>Khoa / Viện</label>
-        <select v-model="form.faculty">
-          <option v-for="faculty in FACULTY_OPTIONS" :key="faculty" :value="faculty">{{ faculty }}</option>
-        </select>
-
         <label>Email</label>
         <div>
           <input v-model="form.email" type="email" />
@@ -238,7 +229,6 @@ async function submitForm() {
           <span class="label">Ngày sinh</span><span>{{ form.date_of_birth || '-' }}</span>
           <span class="label">Giới tính</span><span>{{ form.gender }}</span>
           <span class="label">Lớp</span><span>{{ form.class_name }}</span>
-          <span class="label">Khoa / Viện</span><span>{{ form.faculty }}</span>
           <span class="label">Email</span><span>{{ form.email || '-' }}</span>
           <span class="label">Số điện thoại</span><span>{{ form.phone || '-' }}</span>
           <span class="label">Trạng thái</span><span>{{ form.status }}</span>

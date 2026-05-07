@@ -1,0 +1,20 @@
+{
+  "info": {
+    "name": "Sample API Collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{baseUrl}}/api/index.php",
+          "host": ["{{baseUrl}}"],
+          "path": ["api", "index.php"]
+        }
+      }
+    }
+  ]
+}

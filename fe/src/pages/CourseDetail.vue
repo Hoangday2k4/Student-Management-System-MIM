@@ -10,19 +10,44 @@ const errorMessage = ref('')
 const accountType = ref('')
 const course = ref(null)
 const students = ref([])
+const addModalOpen = ref(false)
+const addLoading = ref(false)
+const addError = ref('')
+const addKeyword = ref('')
+const candidateStudents = ref([])
+const addingStudentCode = ref('')
 
 const isStaff = computed(() => accountType.value === 'staff')
 const isTeacher = computed(() => accountType.value === 'teacher')
 
+function statusLabelVi(rawStatus) {
+  const raw = String(rawStatus || '').toUpperCase()
+  if (raw === 'OPEN') return 'Dang mo'
+  if (raw === 'CLOSED') return 'Da dong'
+  if (raw === 'LOCKED') return 'Da khoa'
+  if (raw === 'DRAFT') return 'Nhap'
+  return '-'
+}
+
+const statusLabel = computed(() => {
+  return statusLabelVi(course.value?.enrollment_status)
+})
+
+const statusClass = computed(() => {
+  const raw = String(course.value?.enrollment_status || '').toUpperCase()
+  if (raw === 'OPEN') return 'st-open'
+  if (raw === 'CLOSED') return 'st-closed'
+  if (raw === 'LOCKED') return 'st-locked'
+  return 'st-draft'
+})
+
 const searchQuery = computed(() => {
   const q = {}
   const keyword = String(route.query.keyword || '').trim()
-  const department = String(route.query.department || '').trim()
   const teacherCode = String(route.query.teacher_code || '').trim()
   const searched = String(route.query.searched || '0')
 
   if (keyword) q.keyword = keyword
-  if (department) q.department = department
   if (teacherCode) q.teacher_code = teacherCode
   q.searched = searched === '1' ? '1' : '0'
   return q
@@ -45,6 +70,107 @@ function goUpdate() {
   router.push({ path: '/courses/update', query: { id: String(course.value.id), ...searchQuery.value } })
 }
 
+function goAttendance() {
+  if (!course.value?.id) return
+  router.push({ path: '/courses/attendance', query: { id: String(course.value.id) } })
+}
+
+function getEnrolledMap() {
+  const map = new Set()
+  for (const student of students.value) {
+    const code = String(student?.student_code || '').trim().toLowerCase()
+    if (code) map.add(code)
+  }
+  return map
+}
+
+async function searchCandidates() {
+  if (!course.value?.id) return
+  addLoading.value = true
+  addError.value = ''
+  try {
+    const params = new URLSearchParams()
+    if (addKeyword.value.trim()) params.set('keyword', addKeyword.value.trim())
+    const res = await fetch(params.toString() ? `/api/student.php?${params.toString()}` : '/api/student.php')
+    if (res.status === 401) {
+      router.push('/login')
+      return
+    }
+    if (res.status === 403) {
+      addError.value = 'Ban khong du quyen thuc hien thao tac nay.'
+      candidateStudents.value = []
+      return
+    }
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      addError.value = payload?.detail ? `${payload.message} (${payload.detail})` : (payload?.message || payload?.error || 'Khong tai duoc danh sach sinh vien.')
+      candidateStudents.value = []
+      return
+    }
+    const rows = Array.isArray(payload) ? payload : []
+    const enrolledMap = getEnrolledMap()
+    candidateStudents.value = rows.filter((row) => {
+      const code = String(row?.student_code || '').trim().toLowerCase()
+      return code && !enrolledMap.has(code)
+    })
+  } catch (error) {
+    addError.value = 'Khong ket noi duoc may chu.'
+    candidateStudents.value = []
+  } finally {
+    addLoading.value = false
+  }
+}
+
+async function openAddModal() {
+  addModalOpen.value = true
+  addKeyword.value = ''
+  candidateStudents.value = []
+  addError.value = ''
+  await searchCandidates()
+}
+
+function closeAddModal() {
+  addModalOpen.value = false
+  addKeyword.value = ''
+  candidateStudents.value = []
+  addError.value = ''
+  addingStudentCode.value = ''
+}
+
+async function addOneStudent(studentCode) {
+  const code = String(studentCode || '').trim()
+  if (!code || !course.value?.id) return
+  addingStudentCode.value = code
+  addError.value = ''
+  try {
+    const res = await fetch('/api/course_detail.php?action=add-students', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: Number(course.value.id), student_codes: [code] }),
+    })
+    if (res.status === 401) {
+      router.push('/login')
+      return
+    }
+    if (res.status === 403) {
+      addError.value = 'Ban khong du quyen thuc hien thao tac nay.'
+      return
+    }
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok || payload?.status !== 'success') {
+      addError.value = payload?.detail ? `${payload.message} (${payload.detail})` : (payload?.message || 'Khong the them sinh vien vao mon hoc.')
+      return
+    }
+    course.value = payload?.data || course.value
+    students.value = Array.isArray(payload?.students) ? payload.students : students.value
+    await searchCandidates()
+  } catch (error) {
+    addError.value = 'Khong ket noi duoc may chu.'
+  } finally {
+    addingStudentCode.value = ''
+  }
+}
+
 async function loadPage() {
   loading.value = true
   errorMessage.value = ''
@@ -63,7 +189,7 @@ async function loadPage() {
       return
     }
 
-    const res = await fetch(`/api/courses/detail?id=${id}`)
+    const res = await fetch(`/api/course_detail.php?id=${id}`)
     const payload = await res.json().catch(() => ({}))
     if (!res.ok || payload.status !== 'success') {
       errorMessage.value = payload.message || 'Không thể tải chi tiết môn học.'
@@ -95,7 +221,9 @@ onMounted(loadPage)
           <span class="label">Tên môn</span><span>{{ course.course_name }}</span>
           <span class="label">Số tín chỉ</span><span>{{ course.credits ?? '-' }}</span>
           <span class="label">Giáo viên</span><span>{{ course.teacher_name || course.teacher_code }}</span>
-          <span class="label">Khoa/Bộ môn</span><span>{{ course.department || '-' }}</span>
+          <span class="label">Học kỳ</span><span>{{ course.ma_hoc_ky || '-' }}</span>
+          <span class="label">Trạng thái đăng ký</span>
+          <span><span class="status-chip" :class="statusClass">{{ statusLabel }}</span></span>
           <span class="label">Lịch học</span><span>{{ course.schedule || '-' }}</span>
           <span class="label">Phòng học</span><span>{{ course.classroom || '-' }}</span>
           <span class="label">Số lượng tối đa</span><span>{{ course.max_students || '-' }}</span>
@@ -111,7 +239,6 @@ onMounted(loadPage)
                 <th>MSSV</th>
                 <th>Họ tên</th>
                 <th>Lớp</th>
-                <th>Khoa</th>
                 <th>Email</th>
                 <th>SĐT</th>
               </tr>
@@ -121,7 +248,6 @@ onMounted(loadPage)
                 <td>{{ student.student_code }}</td>
                 <td>{{ student.full_name }}</td>
                 <td>{{ student.class_name || '-' }}</td>
-                <td>{{ student.faculty || '-' }}</td>
                 <td>{{ student.email || '-' }}</td>
                 <td>{{ student.phone || '-' }}</td>
               </tr>
@@ -130,10 +256,67 @@ onMounted(loadPage)
         </div>
 
         <div class="actions">
+          <button v-if="isStaff" class="btn-primary" @click="openAddModal">Thêm sinh viên</button>
           <button v-if="isStaff" class="btn-primary" @click="goUpdate">Cập nhật</button>
+          <button v-if="isTeacher" class="btn-primary" @click="goAttendance">Điểm danh</button>
           <button class="btn-ghost" @click="goBackToSearch">Trở về</button>
         </div>
       </template>
+
+      <div v-if="addModalOpen" class="modal-backdrop" @click.self="closeAddModal">
+        <div class="modal-card">
+          <div class="modal-head">
+            <h3>Thêm sinh viên vào môn học</h3>
+            <button type="button" class="btn-close" @click="closeAddModal">Đóng</button>
+          </div>
+
+          <div class="modal-toolbar">
+            <input
+              v-model="addKeyword"
+              type="text"
+              placeholder="Tìm MSSV, họ tên, lớp, email..."
+              @keyup.enter="searchCandidates"
+            />
+            <button type="button" class="btn-primary" @click="searchCandidates">Tìm</button>
+          </div>
+
+          <p v-if="addLoading" class="state">Đang tải danh sách sinh viên...</p>
+          <p v-else-if="addError" class="state error">{{ addError }}</p>
+          <p v-else-if="candidateStudents.length === 0" class="state">Không có sinh viên phù hợp để thêm.</p>
+
+          <div v-else class="table-scroll modal-table">
+            <table class="result-table">
+              <thead>
+                <tr>
+                  <th>MSSV</th>
+                  <th>Họ tên</th>
+                  <th>Lớp</th>
+                  <th>Email</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="st in candidateStudents" :key="st.student_code">
+                  <td>{{ st.student_code }}</td>
+                  <td>{{ st.full_name }}</td>
+                  <td>{{ st.class_name || '-' }}</td>
+                  <td>{{ st.email || '-' }}</td>
+                  <td>
+                    <button
+                      type="button"
+                      class="btn-primary mini"
+                      :disabled="addingStudentCode === st.student_code"
+                      @click="addOneStudent(st.student_code)"
+                    >
+                      {{ addingStudentCode === st.student_code ? 'Đang thêm...' : 'Thêm' }}
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -155,6 +338,83 @@ h2 { margin-top: 22px; }
 .btn-primary, .btn-ghost { border: none; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer; }
 .btn-primary { background: #007336; color: #fff; }
 .btn-ghost { background: #e9eef6; color: #006131; }
+.btn-primary.mini { padding: 6px 10px; font-size: 12px; }
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 12px;
+  font-weight: 700;
+}
+.status-chip.st-open { color: #0f6b31; background: #e8f8ee; border-color: #bfe6cb; }
+.status-chip.st-closed { color: #845d00; background: #fff6dc; border-color: #f0dfaa; }
+.status-chip.st-locked { color: #8e1f1f; background: #fdeeee; border-color: #efc4c4; }
+.status-chip.st-draft { color: #38506f; background: #edf3fb; border-color: #d0deef; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+  padding: 16px;
+}
+
+.modal-card {
+  width: min(1100px, 95vw);
+  max-height: 88vh;
+  background: #fff;
+  border-radius: 10px;
+  border: 1px solid #d7deea;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.modal-head h3 {
+  margin: 0;
+  color: #007336;
+}
+
+.btn-close {
+  border: 1px solid #c7d3e2;
+  background: #f8fbff;
+  color: #2f4565;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.modal-toolbar {
+  display: flex;
+  gap: 8px;
+}
+
+.modal-toolbar input {
+  flex: 1;
+  border: 1px solid #d0d7e2;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.modal-table {
+  max-height: 52vh;
+}
+
 @media (max-width: 900px) {
   .info-grid { grid-template-columns: 1fr; }
 }

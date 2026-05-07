@@ -80,6 +80,10 @@ class Teacher
 
     private static function mapRow(array $row): array
     {
+        $homeroomClass = trim((string)($row['LopPhuTrachHienThi'] ?? ''));
+        if ($homeroomClass === '') {
+            $homeroomClass = (string)($row['LopPhuTrach'] ?? '');
+        }
         return [
             'id' => null,
             'teacher_code' => $row['MaGV'] ?? '',
@@ -87,7 +91,7 @@ class Teacher
             'date_of_birth' => $row['NgaySinh'] ?? '',
             'gender' => $row['GioiTinh'] ?? '',
             'department' => $row['TenNganh'] ?? '',
-            'homeroom_class' => $row['LopPhuTrach'] ?? '',
+            'homeroom_class' => $homeroomClass,
             'email' => $row['Email'] ?? '',
             'phone' => $row['SoDienThoai'] ?? '',
             'avatar' => $row['Avatar'] ?? '',
@@ -128,7 +132,15 @@ class Teacher
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'SELECT g.*, n.TenNganh
+            'SELECT g.*, n.TenNganh,
+                    COALESCE(
+                        NULLIF(trim(g.LopPhuTrach), ""),
+                        (
+                            SELECT GROUP_CONCAT(l.MaLop, ", ")
+                            FROM LopSinhHoat l
+                            WHERE lower(IFNULL(l.MaGV_CoVan, "")) = lower(g.MaGV)
+                        )
+                    ) AS LopPhuTrachHienThi
              FROM GiangVien g
              LEFT JOIN Nganh n ON n.MaNganh = g.MaNganh
              WHERE rowid = :id
@@ -144,7 +156,15 @@ class Teacher
         self::ensureSchema();
         $pdo = get_db_connection();
         $stmt = $pdo->prepare(
-            'SELECT g.*, n.TenNganh
+            'SELECT g.*, n.TenNganh,
+                    COALESCE(
+                        NULLIF(trim(g.LopPhuTrach), ""),
+                        (
+                            SELECT GROUP_CONCAT(l.MaLop, ", ")
+                            FROM LopSinhHoat l
+                            WHERE lower(IFNULL(l.MaGV_CoVan, "")) = lower(g.MaGV)
+                        )
+                    ) AS LopPhuTrachHienThi
              FROM GiangVien g
              LEFT JOIN Nganh n ON n.MaNganh = g.MaNganh
              WHERE lower(g.MaGV) = lower(:code)
@@ -159,7 +179,15 @@ class Teacher
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $sql = 'SELECT g.*, n.TenNganh
+        $sql = 'SELECT g.*, n.TenNganh,
+                    COALESCE(
+                        NULLIF(trim(g.LopPhuTrach), ""),
+                        (
+                            SELECT GROUP_CONCAT(l.MaLop, ", ")
+                            FROM LopSinhHoat l
+                            WHERE lower(IFNULL(l.MaGV_CoVan, "")) = lower(g.MaGV)
+                        )
+                    ) AS LopPhuTrachHienThi
                 FROM GiangVien g
                 LEFT JOIN Nganh n ON n.MaNganh = g.MaNganh
                 WHERE 1=1';
@@ -171,6 +199,11 @@ class Teacher
                 OR lower(g.HoTen) LIKE :keyword
                 OR lower(IFNULL(n.TenNganh,"")) LIKE :keyword
                 OR lower(IFNULL(g.LopPhuTrach,"")) LIKE :keyword
+                OR lower(IFNULL((
+                    SELECT GROUP_CONCAT(l.MaLop, ", ")
+                    FROM LopSinhHoat l
+                    WHERE lower(IFNULL(l.MaGV_CoVan, "")) = lower(g.MaGV)
+                ), "")) LIKE :keyword
                 OR lower(IFNULL(g.Email,"")) LIKE :keyword
                 OR lower(IFNULL(g.SoDienThoai,"")) LIKE :keyword
             )';

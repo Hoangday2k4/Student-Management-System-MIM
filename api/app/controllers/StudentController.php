@@ -107,7 +107,6 @@ class StudentController
         $students = Student::search([
             'keyword' => isset($_GET['keyword']) ? trim((string)$_GET['keyword']) : '',
             'class_name' => isset($_GET['class_name']) ? trim((string)$_GET['class_name']) : '',
-            'faculty' => isset($_GET['faculty']) ? trim((string)$_GET['faculty']) : '',
             'status' => $statusFilter,
         ]);
         foreach ($students as &$student) {
@@ -159,6 +158,7 @@ class StudentController
         $studentCode = trim((string)($payload['student_code'] ?? ''));
         $fullName = trim((string)($payload['full_name'] ?? ''));
         $className = trim((string)($payload['class_name'] ?? ''));
+        $cccd = trim((string)($payload['cccd'] ?? ''));
         $email = trim((string)($payload['email'] ?? ''));
         $gender = $this->normalizeGender((string)($payload['gender'] ?? ''));
         $status = $this->normalizeStatus((string)($payload['status'] ?? ''));
@@ -167,9 +167,21 @@ class StudentController
         if ($studentCode === '') $errors['student_code'] = 'Hay nhap ma so sinh vien.';
         if ($fullName === '') $errors['full_name'] = 'Hay nhap ho ten.';
         if ($className === '') $errors['class_name'] = 'Hay nhap lop.';
+        if ($cccd === '') $errors['cccd'] = 'Hay nhap CCCD.';
+        if ($email === '') $errors['email'] = 'Hay nhap email.';
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Email khong hop le.';
         if ($gender === '') $errors['gender'] = 'Gioi tinh khong hop le.';
         if ($status === '') $errors['status'] = 'Trang thai khong hop le.';
+
+        if ($className !== '') {
+            $pdoCheck = get_db_connection();
+            Student::ensureSchema($pdoCheck);
+            $stmt = $pdoCheck->prepare('SELECT 1 FROM LopSinhHoat WHERE lower(MaLop) = lower(:ma_lop) LIMIT 1');
+            $stmt->execute([':ma_lop' => $className]);
+            if (!$stmt->fetchColumn()) {
+                $errors['class_name'] = 'Ma lop sinh hoat khong ton tai.';
+            }
+        }
 
         if (!empty($errors)) {
             jsonResponse(['status' => 'error', 'message' => 'Du lieu khong hop le.', 'fields' => $errors], 422);
@@ -188,10 +200,12 @@ class StudentController
                 'full_name' => $fullName,
                 'date_of_birth' => trim((string)($payload['date_of_birth'] ?? '')),
                 'gender' => $gender,
+                'cccd' => $cccd,
+                'address' => trim((string)($payload['address'] ?? '')),
                 'class_name' => $className,
-                'faculty' => trim((string)($payload['faculty'] ?? '')),
                 'email' => $email,
                 'phone' => trim((string)($payload['phone'] ?? '')),
+                'ngay_nhap_hoc' => trim((string)($payload['ngay_nhap_hoc'] ?? '')),
                 'avatar' => '',
                 'status' => $status,
             ]);
@@ -222,6 +236,22 @@ class StudentController
                     'status' => 'error',
                     'message' => 'Tai khoan dang nhap trung login id da ton tai.',
                     'fields' => ['student_code' => 'Login id da ton tai trong he thong.'],
+                ], 409);
+                return;
+            }
+            if (strpos($message, 'UNIQUE constraint failed: SinhVien.CCCD') !== false) {
+                jsonResponse([
+                    'status' => 'error',
+                    'message' => 'CCCD da ton tai.',
+                    'fields' => ['cccd' => 'CCCD da ton tai.'],
+                ], 409);
+                return;
+            }
+            if (strpos($message, 'UNIQUE constraint failed: SinhVien.Email') !== false) {
+                jsonResponse([
+                    'status' => 'error',
+                    'message' => 'Email da ton tai.',
+                    'fields' => ['email' => 'Email da ton tai.'],
                 ], 409);
                 return;
             }
@@ -256,7 +286,7 @@ class StudentController
         $rows = [];
         $handle = fopen($filePath, 'rb');
         if (!$handle) return $rows;
-        while (($data = fgetcsv($handle)) !== false) {
+        while (($data = fgetcsv($handle, 0, ',', '"', '')) !== false) {
             $row = [];
             foreach ($data as $cell) {
                 $row[] = trim((string)$cell);
@@ -397,8 +427,9 @@ class StudentController
             'full_name' => ['hoten', 'hten', 'tensinhvien', 'fullname'],
             'date_of_birth' => ['ngaysinh', 'dateofbirth', 'dob'],
             'gender' => ['gioitinh', 'gender'],
+            'cccd' => ['cccd', 'socccd', 'can-cuoc-cong-dan'],
             'class_name' => ['lop', 'lp', 'classname'],
-            'faculty' => ['khoa', 'vien', 'khoavien', 'faculty'],
+            'address' => ['diachi', 'dchi', 'address'],
             'email' => ['email'],
             'phone' => ['sodienthoai', 'sdt', 'phone'],
             'status' => ['trangthai', 'status'],
@@ -415,27 +446,32 @@ class StudentController
             }
         }
 
-        // Fallback to default 9-column order when some headers are malformed.
+        // Fallback when headers are malformed.
+        // Support both layouts:
+        // - 9 columns: MSSV, HoTen, NgaySinh, GioiTinh, CCCD, Lop, Email, SoDienThoai, TrangThai
+        // - 10 columns: MSSV, HoTen, NgaySinh, GioiTinh, CCCD, Lop, (DiaChi|Khoa), Email, SoDienThoai, TrangThai
         if (count($headers) >= 9) {
+            $hasExtraColumn = count($headers) >= 10;
             $defaultMap = [
                 'student_code' => 0,
                 'full_name' => 1,
                 'date_of_birth' => 2,
                 'gender' => 3,
-                'class_name' => 4,
-                'faculty' => 5,
-                'email' => 6,
-                'phone' => 7,
-                'status' => 8,
+                'cccd' => 4,
+                'class_name' => 5,
+                'address' => $hasExtraColumn ? 6 : -1,
+                'email' => $hasExtraColumn ? 7 : 6,
+                'phone' => $hasExtraColumn ? 8 : 7,
+                'status' => $hasExtraColumn ? 9 : 8,
             ];
             foreach ($defaultMap as $field => $position) {
-                if (!isset($headerMap[$field])) {
+                if ($position >= 0 && !isset($headerMap[$field])) {
                     $headerMap[$field] = $position;
                 }
             }
         }
 
-        foreach (['student_code', 'full_name', 'class_name'] as $requiredField) {
+        foreach (['student_code', 'full_name', 'cccd', 'class_name', 'email'] as $requiredField) {
             if (!isset($headerMap[$requiredField])) {
                 throw new RuntimeException('File thieu cot bat buoc: ' . $requiredField);
             }
@@ -453,9 +489,10 @@ class StudentController
                 'full_name' => trim((string)($source[$headerMap['full_name']] ?? '')),
                 'date_of_birth' => trim((string)($source[$headerMap['date_of_birth'] ?? -1] ?? '')),
                 'gender' => trim((string)($source[$headerMap['gender'] ?? -1] ?? 'Nam')),
+                'cccd' => trim((string)($source[$headerMap['cccd']] ?? '')),
                 'class_name' => trim((string)($source[$headerMap['class_name']] ?? '')),
-                'faculty' => trim((string)($source[$headerMap['faculty'] ?? -1] ?? '')),
-                'email' => trim((string)($source[$headerMap['email'] ?? -1] ?? '')),
+                'address' => trim((string)($source[$headerMap['address'] ?? -1] ?? '')),
+                'email' => trim((string)($source[$headerMap['email']] ?? '')),
                 'phone' => trim((string)($source[$headerMap['phone'] ?? -1] ?? '')),
                 'status' => trim((string)($source[$headerMap['status'] ?? -1] ?? 'Dang hoc')),
             ];
@@ -463,7 +500,7 @@ class StudentController
             if ($row['student_code'] === '' && $row['full_name'] === '' && $row['class_name'] === '') {
                 continue;
             }
-            if ($row['student_code'] === '' || $row['full_name'] === '' || $row['class_name'] === '') {
+            if ($row['student_code'] === '' || $row['full_name'] === '' || $row['cccd'] === '' || $row['class_name'] === '' || $row['email'] === '') {
                 $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Thieu truong bat buoc'];
                 continue;
             }
@@ -490,8 +527,9 @@ class StudentController
             'full_name' => trim((string)($row['full_name'] ?? '')),
             'date_of_birth' => trim((string)($row['date_of_birth'] ?? '')),
             'gender' => $gender,
+            'cccd' => trim((string)($row['cccd'] ?? '')),
             'class_name' => trim((string)($row['class_name'] ?? '')),
-            'faculty' => trim((string)($row['faculty'] ?? '')),
+            'address' => trim((string)($row['address'] ?? '')),
             'email' => trim((string)($row['email'] ?? '')),
             'phone' => trim((string)($row['phone'] ?? '')),
             'status' => $status,
@@ -562,25 +600,53 @@ class StudentController
             $skipped = [];
             $existingStudents = [];
             $existingLogins = [];
+            $existingCccds = [];
+            $existingEmails = [];
 
             $studentCodes = $pdo->query('SELECT MaSV FROM SinhVien')->fetchAll(PDO::FETCH_COLUMN);
             foreach ($studentCodes as $code) {
                 $existingStudents[strtolower(trim((string)$code))] = true;
             }
-            $loginIds = $pdo->query('SELECT LoginId FROM TaiKhoan')->fetchAll(PDO::FETCH_COLUMN);
-            foreach ($loginIds as $loginId) {
-                $existingLogins[strtolower(trim((string)$loginId))] = true;
+            $loginRows = $pdo->query('SELECT LoginId, LoaiTaiKhoan FROM TaiKhoan')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($loginRows as $loginRow) {
+                $loginId = strtolower(trim((string)($loginRow['LoginId'] ?? '')));
+                if ($loginId === '') {
+                    continue;
+                }
+
+                $accountType = strtolower(trim((string)($loginRow['LoaiTaiKhoan'] ?? '')));
+                $isStudentLikeLogin = preg_match('/^sv[0-9a-z_-]*$/i', $loginId) === 1;
+                // Tu dong don TaiKhoan mo coi theo MaSV de tranh import skip sai do LoginId da ton tai.
+                if (!isset($existingStudents[$loginId]) && ($accountType === 'student' || $isStudentLikeLogin)) {
+                    $stmtDeleteOrphan = $pdo->prepare('DELETE FROM TaiKhoan WHERE lower(LoginId)=:login_id');
+                    $stmtDeleteOrphan->execute([
+                        ':login_id' => $loginId,
+                    ]);
+                    continue;
+                }
+
+                $existingLogins[$loginId] = true;
+            }
+            $cccds = $pdo->query('SELECT CCCD FROM SinhVien WHERE CCCD IS NOT NULL AND trim(CCCD) <> ""')->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($cccds as $cccd) {
+                $existingCccds[strtolower(trim((string)$cccd))] = true;
+            }
+            $emails = $pdo->query('SELECT Email FROM SinhVien WHERE Email IS NOT NULL AND trim(Email) <> ""')->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($emails as $email) {
+                $existingEmails[strtolower(trim((string)$email))] = true;
             }
 
             foreach ($rows as $idx => $raw) {
                 $line = $idx + 2;
                 $row = $this->normalizeImportRow(is_array($raw) ? $raw : []);
                 $studentCodeKey = strtolower($row['student_code']);
-                if ($row['student_code'] === '' || $row['full_name'] === '' || $row['class_name'] === '') {
+                $cccdKey = strtolower(trim((string)$row['cccd']));
+                $emailKey = strtolower(trim((string)$row['email']));
+                if ($row['student_code'] === '' || $row['full_name'] === '' || $row['cccd'] === '' || $row['class_name'] === '' || $row['email'] === '') {
                     $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Thieu truong bat buoc'];
                     continue;
                 }
-                if ($row['email'] !== '' && !filter_var($row['email'], FILTER_VALIDATE_EMAIL)) {
+                if (!filter_var($row['email'], FILTER_VALIDATE_EMAIL)) {
                     $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Email khong hop le'];
                     continue;
                 }
@@ -592,23 +658,81 @@ class StudentController
                     $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Login da ton tai'];
                     continue;
                 }
+                if (isset($existingCccds[$cccdKey])) {
+                    $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'CCCD da ton tai'];
+                    continue;
+                }
+                if (isset($existingEmails[$emailKey])) {
+                    $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Email da ton tai'];
+                    continue;
+                }
+                $stmt = $pdo->prepare('SELECT 1 FROM LopSinhHoat WHERE lower(MaLop) = lower(:ma_lop) LIMIT 1');
+                $stmt->execute([':ma_lop' => $row['class_name']]);
+                if (!$stmt->fetchColumn()) {
+                    $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Ma lop sinh hoat khong ton tai'];
+                    continue;
+                }
 
-                Student::insertWithPdo($pdo, [
-                    'student_code' => $row['student_code'],
-                    'full_name' => $row['full_name'],
-                    'date_of_birth' => $row['date_of_birth'],
-                    'gender' => $row['gender'],
-                    'class_name' => $row['class_name'],
-                    'faculty' => $row['faculty'],
-                    'email' => $row['email'],
-                    'phone' => $row['phone'],
-                    'avatar' => '',
-                    'status' => $row['status'],
-                ]);
-                Admin::createAccountWithPdo($pdo, $row['student_code'], '123456', $row['full_name'], 'student');
-                $existingStudents[$studentCodeKey] = true;
-                $existingLogins[$studentCodeKey] = true;
-                $inserted++;
+                try {
+                    $pdo->exec('SAVEPOINT import_student_row');
+
+                    Student::insertWithPdo($pdo, [
+                        'student_code' => $row['student_code'],
+                        'full_name' => $row['full_name'],
+                        'date_of_birth' => $row['date_of_birth'],
+                        'gender' => $row['gender'],
+                        'cccd' => $row['cccd'],
+                        'class_name' => $row['class_name'],
+                        'address' => $row['address'],
+                        'email' => $row['email'],
+                        'phone' => $row['phone'],
+                        'avatar' => '',
+                        'status' => $row['status'],
+                    ]);
+                    Admin::createAccountWithPdo($pdo, $row['student_code'], '123456', $row['full_name'], 'student');
+
+                    $pdo->exec('RELEASE SAVEPOINT import_student_row');
+
+                    $existingStudents[$studentCodeKey] = true;
+                    $existingLogins[$studentCodeKey] = true;
+                    $existingCccds[$cccdKey] = true;
+                    $existingEmails[$emailKey] = true;
+                    $inserted++;
+                } catch (PDOException $e) {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT import_student_row');
+                    $pdo->exec('RELEASE SAVEPOINT import_student_row');
+
+                    $message = (string)$e->getMessage();
+                    if (strpos($message, 'UNIQUE constraint failed: TaiKhoan.LoginId') !== false) {
+                        $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Login da ton tai'];
+                        continue;
+                    }
+                    if (strpos($message, 'UNIQUE constraint failed: SinhVien.MaSV') !== false) {
+                        $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Ma so sinh vien da ton tai'];
+                        continue;
+                    }
+                    if (strpos($message, 'UNIQUE constraint failed: SinhVien.CCCD') !== false) {
+                        $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'CCCD da ton tai'];
+                        continue;
+                    }
+                    if (strpos($message, 'UNIQUE constraint failed: SinhVien.Email') !== false) {
+                        $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Email da ton tai'];
+                        continue;
+                    }
+                    throw $e;
+                }
+            }
+
+            $skippedSummary = [];
+            foreach ($skipped as $item) {
+                $reason = trim((string)($item['reason'] ?? 'Khong xac dinh'));
+                if ($reason === '') {
+                    $reason = 'Khong xac dinh';
+                }
+                if (!isset($skippedSummary[$reason])) {
+                    $skippedSummary[$reason] = 0;
+                }
+                $skippedSummary[$reason]++;
             }
 
             $pdo->commit();
@@ -617,6 +741,7 @@ class StudentController
                 'inserted_count' => $inserted,
                 'skipped_count' => count($skipped),
                 'skipped' => $skipped,
+                'skipped_summary' => $skippedSummary,
                 'default_password' => '123456',
             ]);
         } catch (PDOException $e) {
@@ -737,7 +862,6 @@ class StudentController
             'date_of_birth' => trim((string)($payload['date_of_birth'] ?? ($current['date_of_birth'] ?? ''))),
             'gender' => $gender,
             'class_name' => $className,
-            'faculty' => trim((string)($payload['faculty'] ?? ($current['faculty'] ?? ''))),
             'email' => $email,
             'phone' => trim((string)($payload['phone'] ?? ($current['phone'] ?? ''))),
             'avatar' => $avatar,
@@ -804,7 +928,6 @@ class StudentController
         $email = trim((string)($payload['email'] ?? ''));
         $gender = $this->normalizeGender((string)($payload['gender'] ?? ''));
         $status = $this->normalizeStatus((string)($payload['status'] ?? ''));
-        $faculty = trim((string)($payload['faculty'] ?? ''));
         $dateOfBirth = trim((string)($payload['date_of_birth'] ?? ''));
         $phone = trim((string)($payload['phone'] ?? ''));
 
@@ -932,8 +1055,11 @@ class StudentController
             $stmt->execute([':code' => $studentCode]);
             $stmt = $pdo->prepare('DELETE FROM SinhVien WHERE MaSV = :code');
             $stmt->execute([':code' => $studentCode]);
-            $stmt = $pdo->prepare('DELETE FROM TaiKhoan WHERE lower(LoginId)=lower(:code) AND LoaiTaiKhoan = "student"');
-            $stmt->execute([':code' => $studentCode]);
+            $stmt = $pdo->prepare('DELETE FROM TaiKhoan WHERE lower(LoginId)=lower(:code) AND lower(LoaiTaiKhoan)=:account_type');
+            $stmt->execute([
+                ':code' => $studentCode,
+                ':account_type' => 'student',
+            ]);
             $pdo->commit();
 
             jsonResponse(['status' => 'success', 'message' => 'Đã xóa sinh viên và tài khoản liên quan.']);

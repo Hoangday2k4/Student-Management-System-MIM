@@ -70,7 +70,7 @@ async function loadData() {
       return
     }
 
-    const res = await fetch(`/api/courses/grade?id=${id}`)
+    const res = await fetch(`/api/course_grade.php?id=${id}`)
     const payload = await res.json().catch(() => ({}))
     if (!res.ok || payload.status !== 'success') {
       errorMessage.value = payload.message || 'Không tải được dữ liệu điểm.'
@@ -123,7 +123,7 @@ async function saveGrades() {
 
   saving.value = true
   try {
-    const res = await fetch('/api/courses/grade', {
+    const res = await fetch('/api/course_grade.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

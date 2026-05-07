@@ -1,6 +1,5 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { FACULTY_OPTIONS } from '@/constants/options'
 
 const loading = ref(false)
 const searched = ref(false)
@@ -17,7 +16,6 @@ const currentStudentCode = ref('')
 const filters = reactive({
   keyword: '',
   class_name: '',
-  faculty: '',
   status: '',
 })
 
@@ -27,7 +25,6 @@ const editForm = reactive({
   date_of_birth: '',
   gender: 'Nam',
   class_name: '',
-  faculty: '',
   email: '',
   phone: '',
   status: 'Đang học',
@@ -48,7 +45,6 @@ function buildQuery() {
   const params = new URLSearchParams()
   if (filters.keyword.trim()) params.append('keyword', filters.keyword.trim())
   if (filters.class_name.trim()) params.append('class_name', filters.class_name.trim())
-  if (filters.faculty.trim()) params.append('faculty', filters.faculty.trim())
   if (filters.status.trim()) params.append('status', filters.status.trim())
   return params.toString()
 }
@@ -59,7 +55,7 @@ async function doSearch() {
   errorMessage.value = ''
   try {
     const query = buildQuery()
-    const res = await fetch(query ? `/api/students?${query}` : '/api/students')
+    const res = await fetch(query ? `/api/student.php?${query}` : '/api/student.php')
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
       errorMessage.value = data.message || data.error || 'Không thể tải dữ liệu tìm kiếm.'
@@ -89,7 +85,6 @@ function fillEditForm(student) {
   editForm.date_of_birth = String(student?.date_of_birth || '')
   editForm.gender = String(student?.gender || 'Nam') || 'Nam'
   editForm.class_name = String(student?.class_name || '')
-  editForm.faculty = String(student?.faculty || '')
   editForm.email = String(student?.email || '')
   editForm.phone = String(student?.phone || '')
   editForm.status = String(student?.status || 'Đang học') || 'Đang học'
@@ -100,7 +95,7 @@ async function fetchStudentDetail(studentCode) {
   modalError.value = ''
   try {
     const encoded = encodeURIComponent(studentCode)
-    const res = await fetch(`/api/students/detail?student_code=${encoded}`)
+    const res = await fetch(`/api/student_detail.php?student_code=${encoded}`)
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.status !== 'success') {
       modalError.value = data.message || 'Không tải được thông tin sinh viên.'
@@ -146,12 +141,11 @@ async function saveEdit() {
       date_of_birth: editForm.date_of_birth.trim(),
       gender: editForm.gender,
       class_name: editForm.class_name.trim(),
-      faculty: editForm.faculty.trim(),
       email: editForm.email.trim(),
       phone: editForm.phone.trim(),
       status: editForm.status,
     }
-    const res = await fetch('/api/students/detail', {
+    const res = await fetch('/api/student_detail.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -177,7 +171,7 @@ async function deleteStudent(student) {
 
   errorMessage.value = ''
   try {
-    const res = await fetch(`/api/students?student_code=${encodeURIComponent(studentCode)}`, { method: 'DELETE' })
+    const res = await fetch(`/api/student.php?student_code=${encodeURIComponent(studentCode)}`, { method: 'DELETE' })
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.status !== 'success') {
       errorMessage.value = data.message || 'Không thể xóa sinh viên.'
@@ -209,13 +203,6 @@ onMounted(async () => {
           <input v-model="filters.class_name" type="text" placeholder="VD: K69-CLC1" />
         </div>
         <div>
-          <label>Khoa / Viện</label>
-          <select v-model="filters.faculty">
-            <option value="">Tất cả</option>
-            <option v-for="faculty in FACULTY_OPTIONS" :key="faculty" :value="faculty">{{ faculty }}</option>
-          </select>
-        </div>
-        <div>
           <label>Trạng thái</label>
           <select v-model="filters.status">
             <option value="">Tất cả</option>
@@ -245,7 +232,6 @@ onMounted(async () => {
                 <th>MSSV</th>
                 <th>Họ tên</th>
                 <th>Lớp</th>
-                <th>Khoa/Viện</th>
                 <th>Email</th>
                 <th>SĐT</th>
                 <th>Trạng thái</th>
@@ -257,7 +243,6 @@ onMounted(async () => {
                 <td>{{ student.student_code }}</td>
                 <td>{{ student.full_name }}</td>
                 <td>{{ student.class_name }}</td>
-                <td>{{ student.faculty || '-' }}</td>
                 <td>{{ student.email || '-' }}</td>
                 <td>{{ student.phone || '-' }}</td>
                 <td>{{ statusLabel(student.status) }}</td>
@@ -300,7 +285,6 @@ onMounted(async () => {
             <div><b>Ngày sinh:</b> {{ editForm.date_of_birth || '-' }}</div>
             <div><b>Giới tính:</b> {{ editForm.gender || '-' }}</div>
             <div><b>Lớp:</b> {{ editForm.class_name || '-' }}</div>
-            <div><b>Khoa/Viện:</b> {{ editForm.faculty || '-' }}</div>
             <div><b>Email:</b> {{ editForm.email || '-' }}</div>
             <div><b>SĐT:</b> {{ editForm.phone || '-' }}</div>
             <div><b>Trạng thái:</b> {{ statusLabel(editForm.status) }}</div>
@@ -323,12 +307,6 @@ onMounted(async () => {
 
             <label>Lớp</label>
             <input v-model="editForm.class_name" type="text" />
-
-            <label>Khoa/Viện</label>
-            <select v-model="editForm.faculty">
-              <option value="">-- Chọn khoa/viện --</option>
-              <option v-for="faculty in FACULTY_OPTIONS" :key="faculty" :value="faculty">{{ faculty }}</option>
-            </select>
 
             <label>Email</label>
             <input v-model="editForm.email" type="email" />

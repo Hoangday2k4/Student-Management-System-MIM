@@ -1,6 +1,5 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { FACULTY_OPTIONS } from '@/constants/options'
 
 const loading = ref(false)
 const searched = ref(false)
@@ -16,7 +15,6 @@ const currentTeacherCode = ref('')
 
 const filters = reactive({
   keyword: '',
-  department: '',
   status: '',
 })
 
@@ -25,7 +23,6 @@ const editForm = reactive({
   full_name: '',
   date_of_birth: '',
   gender: 'Nam',
-  department: '',
   homeroom_class: '',
   email: '',
   phone: '',
@@ -46,7 +43,6 @@ async function loadIdentity() {
 function buildQuery() {
   const params = new URLSearchParams()
   if (filters.keyword.trim()) params.append('keyword', filters.keyword.trim())
-  if (filters.department.trim()) params.append('department', filters.department.trim())
   if (filters.status.trim()) params.append('status', filters.status.trim())
   return params.toString()
 }
@@ -57,7 +53,7 @@ async function doSearch() {
   errorMessage.value = ''
   try {
     const query = buildQuery()
-    const res = await fetch(query ? `/api/teachers?${query}` : '/api/teachers')
+    const res = await fetch(query ? `/api/teacher.php?${query}` : '/api/teacher.php')
     const data = await res.json().catch(() => ({}))
     if (!res.ok) {
       errorMessage.value = data.message || data.error || 'Không thể tải dữ liệu tìm kiếm.'
@@ -78,7 +74,6 @@ function fillEditForm(teacher) {
   editForm.full_name = String(teacher?.full_name || '')
   editForm.date_of_birth = String(teacher?.date_of_birth || '')
   editForm.gender = String(teacher?.gender || 'Nam') || 'Nam'
-  editForm.department = String(teacher?.department || '')
   editForm.homeroom_class = String(teacher?.homeroom_class || '')
   editForm.email = String(teacher?.email || '')
   editForm.phone = String(teacher?.phone || '')
@@ -90,7 +85,7 @@ async function fetchTeacherDetail(teacherCode) {
   modalError.value = ''
   try {
     const encoded = encodeURIComponent(teacherCode)
-    const res = await fetch(`/api/teachers/detail?teacher_code=${encoded}`)
+    const res = await fetch(`/api/teacher_detail.php?teacher_code=${encoded}`)
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.status !== 'success') {
       modalError.value = data.message || 'Không tải được thông tin giáo viên.'
@@ -135,13 +130,12 @@ async function saveEdit() {
       full_name: editForm.full_name.trim(),
       date_of_birth: editForm.date_of_birth.trim(),
       gender: editForm.gender,
-      department: editForm.department.trim(),
       homeroom_class: editForm.homeroom_class.trim(),
       email: editForm.email.trim(),
       phone: editForm.phone.trim(),
       status: editForm.status,
     }
-    const res = await fetch('/api/teachers/detail', {
+    const res = await fetch('/api/teacher_detail.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -167,7 +161,7 @@ async function deleteTeacher(teacher) {
 
   errorMessage.value = ''
   try {
-    const res = await fetch(`/api/teachers?teacher_code=${encodeURIComponent(teacherCode)}`, { method: 'DELETE' })
+    const res = await fetch(`/api/teacher.php?teacher_code=${encodeURIComponent(teacherCode)}`, { method: 'DELETE' })
     const data = await res.json().catch(() => ({}))
     if (!res.ok || data.status !== 'success') {
       errorMessage.value = data.message || 'Không thể xóa giáo viên.'
@@ -193,13 +187,6 @@ onMounted(async () => {
         <div>
           <label>Từ khóa</label>
           <input v-model="filters.keyword" type="text" placeholder="Mã GV, họ tên, email, số điện thoại..." />
-        </div>
-        <div>
-          <label>Khoa/Bộ môn</label>
-          <select v-model="filters.department">
-            <option value="">Tất cả</option>
-            <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
-          </select>
         </div>
         <div>
           <label>Trạng thái</label>
@@ -230,7 +217,6 @@ onMounted(async () => {
               <tr>
                 <th>Mã GV</th>
                 <th>Họ tên</th>
-                <th>Khoa/Bộ môn</th>
                 <th>Lớp phụ trách</th>
                 <th>Email</th>
                 <th>SĐT</th>
@@ -242,7 +228,6 @@ onMounted(async () => {
               <tr v-for="teacher in teachers" :key="teacher.id">
                 <td>{{ teacher.teacher_code }}</td>
                 <td>{{ teacher.full_name }}</td>
-                <td>{{ teacher.department || '-' }}</td>
                 <td>{{ teacher.homeroom_class || '-' }}</td>
                 <td>{{ teacher.email || '-' }}</td>
                 <td>{{ teacher.phone || '-' }}</td>
@@ -285,7 +270,6 @@ onMounted(async () => {
             <div><b>Họ tên:</b> {{ editForm.full_name || '-' }}</div>
             <div><b>Ngày sinh:</b> {{ editForm.date_of_birth || '-' }}</div>
             <div><b>Giới tính:</b> {{ editForm.gender || '-' }}</div>
-            <div><b>Khoa/Bộ môn:</b> {{ editForm.department || '-' }}</div>
             <div><b>Lớp phụ trách:</b> {{ editForm.homeroom_class || '-' }}</div>
             <div><b>Email:</b> {{ editForm.email || '-' }}</div>
             <div><b>SĐT:</b> {{ editForm.phone || '-' }}</div>
@@ -305,12 +289,6 @@ onMounted(async () => {
             <select v-model="editForm.gender">
               <option value="Nam">Nam</option>
               <option value="Nữ">Nữ</option>
-            </select>
-
-            <label>Khoa/Bộ môn</label>
-            <select v-model="editForm.department">
-              <option value="">-- Chọn khoa/bộ môn --</option>
-              <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
             </select>
 
             <label>Lớp phụ trách</label>

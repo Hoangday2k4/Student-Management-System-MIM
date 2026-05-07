@@ -1,7 +1,6 @@
 ﻿<script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { FACULTY_OPTIONS } from '@/constants/options'
 
 const router = useRouter()
 const step = ref('input') // input | confirm | done | bulk-confirm | bulk-done
@@ -12,7 +11,7 @@ const accountInfo = ref({ login_id: '', default_password: '' })
 const fileInputRef = ref(null)
 const bulkRows = ref([])
 const bulkSkippedInFile = ref([])
-const bulkResult = ref({ inserted_count: 0, skipped_count: 0, skipped: [] })
+const bulkResult = ref({ inserted_count: 0, skipped_count: 0, skipped: [], skipped_summary: {} })
 const bulkFileName = ref('')
 
 const form = reactive({
@@ -20,8 +19,9 @@ const form = reactive({
   full_name: '',
   date_of_birth: '',
   gender: 'Nam',
+  cccd: '',
+  address: '',
   class_name: '',
-  faculty: FACULTY_OPTIONS[0],
   email: '',
   phone: '',
   status: 'Đang học',
@@ -30,6 +30,7 @@ const form = reactive({
 const errors = reactive({
   student_code: '',
   full_name: '',
+  cccd: '',
   class_name: '',
   email: '',
 })
@@ -52,6 +53,7 @@ onMounted(async () => {
 function resetErrors() {
   errors.student_code = ''
   errors.full_name = ''
+  errors.cccd = ''
   errors.class_name = ''
   errors.email = ''
 }
@@ -71,7 +73,14 @@ function validate() {
     errors.class_name = 'Hãy nhập lớp.'
     ok = false
   }
-  if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+  if (!form.cccd.trim()) {
+    errors.cccd = 'Hãy nhập CCCD.'
+    ok = false
+  }
+  if (!form.email.trim()) {
+    errors.email = 'Hãy nhập email.'
+    ok = false
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
     errors.email = 'Email không hợp lệ.'
     ok = false
   }
@@ -165,6 +174,7 @@ async function submitBulkImport() {
       inserted_count: Number(payload.inserted_count || 0),
       skipped_count: Number(payload.skipped_count || 0),
       skipped: Array.isArray(payload.skipped) ? payload.skipped : [],
+      skipped_summary: payload.skipped_summary && typeof payload.skipped_summary === 'object' ? payload.skipped_summary : {},
     }
     accountInfo.value = { login_id: 'Nhiều tài khoản', default_password: String(payload.default_password || '123456') }
     step.value = 'bulk-done'
@@ -180,15 +190,16 @@ async function submitForm() {
   saving.value = true
 
   try {
-    const res = await fetch('/api/students', {
+    const res = await fetch('/api/student.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...form,
         student_code: form.student_code.trim(),
         full_name: form.full_name.trim(),
+        cccd: form.cccd.trim(),
+        address: form.address.trim(),
         class_name: form.class_name.trim(),
-        faculty: form.faculty.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
       }),
@@ -265,18 +276,22 @@ async function submitForm() {
             <option value="Nữ">Nữ</option>
           </select>
 
+          <label for="cccd">CCCD *</label>
+          <div>
+            <input id="cccd" v-model="form.cccd" type="text" maxlength="20" />
+            <p v-if="errors.cccd" class="error">{{ errors.cccd }}</p>
+          </div>
+
           <label for="class_name">Lớp *</label>
           <div>
             <input id="class_name" v-model="form.class_name" type="text" maxlength="40" />
             <p v-if="errors.class_name" class="error">{{ errors.class_name }}</p>
           </div>
 
-          <label for="faculty">Khoa / Viện</label>
-          <select id="faculty" v-model="form.faculty">
-            <option v-for="faculty in FACULTY_OPTIONS" :key="faculty" :value="faculty">{{ faculty }}</option>
-          </select>
+          <label for="address">Địa chỉ</label>
+          <input id="address" v-model="form.address" type="text" maxlength="255" />
 
-          <label for="email">Email</label>
+          <label for="email">Email *</label>
           <div>
             <input id="email" v-model="form.email" type="email" maxlength="120" />
             <p v-if="errors.email" class="error">{{ errors.email }}</p>
@@ -296,7 +311,7 @@ async function submitForm() {
         <p v-if="serverMessage" class="error">{{ serverMessage }}</p>
         <p class="import-hint">
           Cột mặc định file import:
-          <b>MSSV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Lớp</b>, <b>Khoa/Viện</b>, <b>Email</b>, <b>SĐT</b>, <b>Trạng thái</b>.
+          <b>MSSV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>CCCD</b>, <b>Lớp</b>, <b>Email</b>, <b>SĐT</b>, <b>Trạng thái</b>.
         </p>
         <div class="actions">
           <button type="submit" class="btn-primary">Xác nhận</button>
@@ -321,8 +336,9 @@ async function submitForm() {
           <span class="label">Họ tên</span><span>{{ form.full_name }}</span>
           <span class="label">Ngày sinh</span><span>{{ form.date_of_birth || '-' }}</span>
           <span class="label">Giới tính</span><span>{{ form.gender }}</span>
+          <span class="label">CCCD</span><span>{{ form.cccd }}</span>
           <span class="label">Lớp</span><span>{{ form.class_name }}</span>
-          <span class="label">Khoa / Viện</span><span>{{ form.faculty }}</span>
+          <span class="label">Địa chỉ</span><span>{{ form.address || '-' }}</span>
           <span class="label">Email</span><span>{{ form.email || '-' }}</span>
           <span class="label">Số điện thoại</span><span>{{ form.phone || '-' }}</span>
           <span class="label">Trạng thái</span><span>{{ form.status }}</span>
@@ -350,8 +366,8 @@ async function submitForm() {
                 <th>Họ tên</th>
                 <th>Ngày sinh</th>
                 <th>Giới tính</th>
+                <th>CCCD</th>
                 <th>Lớp</th>
-                <th>Khoa / Viện</th>
                 <th>Email</th>
                 <th>SĐT</th>
                 <th>Trạng thái</th>
@@ -363,8 +379,8 @@ async function submitForm() {
                 <td>{{ row.full_name }}</td>
                 <td>{{ row.date_of_birth || '-' }}</td>
                 <td>{{ row.gender || '-' }}</td>
+                <td>{{ row.cccd || '-' }}</td>
                 <td>{{ row.class_name }}</td>
-                <td>{{ row.faculty || '-' }}</td>
                 <td>{{ row.email || '-' }}</td>
                 <td>{{ row.phone || '-' }}</td>
                 <td>{{ row.status || '-' }}</td>
@@ -386,6 +402,33 @@ async function submitForm() {
         <h2>Nhập file thành công</h2>
         <p>Đã thêm <b>{{ bulkResult.inserted_count }}</b> sinh viên vào hệ thống.</p>
         <p v-if="bulkResult.skipped_count > 0">Bỏ qua <b>{{ bulkResult.skipped_count }}</b> dòng bị trùng hoặc không hợp lệ.</p>
+        <div v-if="bulkResult.skipped_count > 0" class="skip-summary-wrap">
+          <h3>Thống kê lý do bỏ qua</h3>
+          <ul class="skip-summary-list">
+            <li v-for="(count, reason) in bulkResult.skipped_summary" :key="reason">
+              {{ reason }}: <b>{{ count }}</b>
+            </li>
+          </ul>
+        </div>
+        <div v-if="bulkResult.skipped_count > 0" class="skip-table-wrap">
+          <h3>Chi tiết dòng bị bỏ qua (tối đa 50 dòng)</h3>
+          <table class="preview-table">
+            <thead>
+              <tr>
+                <th>Dòng</th>
+                <th>MSSV</th>
+                <th>Lý do</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in bulkResult.skipped.slice(0, 50)" :key="`${row.line}-${row.student_code}-${row.reason}`">
+                <td>{{ row.line || '-' }}</td>
+                <td>{{ row.student_code || '-' }}</td>
+                <td>{{ row.reason || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
         <p>
           Tất cả tài khoản mới được tạo với mật khẩu mặc định:
           <b>{{ accountInfo.default_password }}</b>
@@ -566,6 +609,16 @@ button {
   position: sticky;
   top: 0;
   z-index: 2;
+}
+
+.skip-summary-wrap,
+.skip-table-wrap {
+  margin-top: 12px;
+}
+
+.skip-summary-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
 }
 
 @media (max-width: 760px) {

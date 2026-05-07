@@ -20,6 +20,11 @@ import CourseDetail from '../pages/CourseDetail.vue'
 import CourseUpdate from '../pages/CourseUpdate.vue'
 import CourseMyList from '../pages/CourseMyList.vue'
 import CourseGrade from '../pages/CourseGrade.vue'
+import CourseAttendance from '../pages/CourseAttendance.vue'
+import SemesterManage from '../pages/SemesterManage.vue'
+import SemesterCreate from '../pages/SemesterCreate.vue'
+import SemesterUpdate from '../pages/SemesterUpdate.vue'
+import CourseFailReport from '../pages/CourseFailReport.vue'
 import StudentScoreList from '../pages/StudentScoreList.vue'
 import StudentScoreDetail from '../pages/StudentScoreDetail.vue'
 import StudentSchedule from '../pages/StudentSchedule.vue'
@@ -48,6 +53,11 @@ const routes = [
       { path: 'courses/detail', name: 'course-detail', component: CourseDetail, meta: { menuKey: 'course-detail' } },
       { path: 'courses/update', name: 'course-update', component: CourseUpdate, meta: { menuKey: 'course-manage' } },
       { path: 'courses/grade', name: 'course-grade', component: CourseGrade, meta: { menuKey: 'teacher-course-my' } },
+      { path: 'courses/attendance', name: 'course-attendance', component: CourseAttendance, meta: { menuKey: 'teacher-course-my' } },
+      { path: 'semesters/manage', name: 'semester-manage', component: SemesterManage, meta: { menuKey: 'semester-manage' } },
+      { path: 'semesters/create', name: 'semester-create', component: SemesterCreate, meta: { menuKey: 'semester-manage' } },
+      { path: 'semesters/update', name: 'semester-update', component: SemesterUpdate, meta: { menuKey: 'semester-manage' } },
+      { path: 'courses/reports/fail-rate', name: 'course-fail-report', component: CourseFailReport, meta: { menuKey: 'course-fail-report' } },
       { path: 'courses/my', name: 'course-my', component: CourseMyList, meta: { menuKey: 'course-my' } },
       { path: 'teachers/courses', name: 'teacher-course-my', component: CourseMyList, meta: { menuKey: 'teacher-course-my' } },
       { path: 'students/courses', name: 'student-course-my', component: CourseMyList, meta: { menuKey: 'student-course-my' } },
@@ -62,6 +72,8 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
 })
+
+const AUTH_FLAG_KEY = 'sms_auth'
 
 async function parseJsonSafe(res) {
   const raw = await res.text()
@@ -81,11 +93,17 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
+  if (localStorage.getItem(AUTH_FLAG_KEY) !== '1') {
+    next({ name: 'login' })
+    return
+  }
+
   try {
     const res = await fetch('/api/home')
     if (res.ok) {
       const data = await parseJsonSafe(res)
       if (data.login_id) {
+        localStorage.setItem(AUTH_FLAG_KEY, '1')
         next()
         return
       }
@@ -93,6 +111,8 @@ router.beforeEach(async (to, from, next) => {
   } catch (e) {
     // ignore
   }
+
+  localStorage.removeItem(AUTH_FLAG_KEY)
 
   next({ name: 'login' })
 })

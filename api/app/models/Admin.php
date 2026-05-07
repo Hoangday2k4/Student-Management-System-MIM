@@ -2,12 +2,8 @@
 
 class Admin
 {
-    public static function ensureSchema(?PDO $pdo = null): void
+    private static function ensureAccountTable(PDO $pdo): void
     {
-        if (!$pdo) {
-            $pdo = get_db_connection();
-        }
-
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS TaiKhoan (
                 Id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -21,6 +17,15 @@ class Admin
                 Created TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )'
         );
+    }
+
+    public static function ensureSchema(?PDO $pdo = null): void
+    {
+        if (!$pdo) {
+            $pdo = get_db_connection();
+        }
+
+        self::ensureAccountTable($pdo);
 
         self::seedBaseAccounts($pdo);
         self::seedFromPeopleTables($pdo);
@@ -107,7 +112,8 @@ class Admin
 
     public static function createAccountWithPdo(PDO $pdo, string $loginId, string $password, string $name = '', string $accountType = 'student'): int
     {
-        self::ensureSchema($pdo);
+        // Avoid reseeding from people tables here; import/create flows call this many times.
+        self::ensureAccountTable($pdo);
         $stmt = $pdo->prepare(
             'INSERT INTO TaiKhoan (LoginId, MatKhau, HoTen, LoaiTaiKhoan, TrangThai, Created)
              VALUES (:login_id, :password, :name, :account_type, 1, CURRENT_TIMESTAMP)'

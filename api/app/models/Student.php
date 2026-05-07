@@ -22,14 +22,14 @@ class Student
                 MaSV TEXT PRIMARY KEY,
                 HoTen TEXT NOT NULL,
                 NgaySinh TEXT,
-                GioiTinh TEXT,
-                CCCD TEXT UNIQUE,
+                GioiTinh TEXT NOT NULL,
+                CCCD TEXT NOT NULL UNIQUE,
                 DiaChi TEXT,
                 SoDienThoai TEXT,
-                Email TEXT UNIQUE,
-                MaLop TEXT,
+                Email TEXT NOT NULL UNIQUE,
+                MaLop TEXT NOT NULL,
                 NgayNhapHoc TEXT,
-                TrangThai TEXT
+                TrangThai TEXT NOT NULL
             )'
         );
         $pdo->exec(
@@ -85,25 +85,18 @@ class Student
         return $code;
     }
 
-    private static function ensureLop(PDO $pdo, string $className, string $faculty): void
+    private static function ensureLopExists(PDO $pdo, string $className): void
     {
         $maLop = trim($className);
         if ($maLop === '') {
-            return;
+            throw new RuntimeException('Thieu ma lop sinh hoat.');
         }
-        $maNganh = self::resolveNganhIdByName($pdo, $faculty);
-        $stmt = $pdo->prepare(
-            'INSERT INTO LopSinhHoat (MaLop, TenLop, MaNganh, MaGV_CoVan, NienKhoa)
-             VALUES (:ma_lop, :ten_lop, :ma_nganh, NULL, NULL)
-             ON CONFLICT(MaLop) DO UPDATE SET
-                TenLop = excluded.TenLop,
-                MaNganh = COALESCE(excluded.MaNganh, LopSinhHoat.MaNganh)'
-        );
-        $stmt->execute([
-            ':ma_lop' => $maLop,
-            ':ten_lop' => $maLop,
-            ':ma_nganh' => $maNganh,
-        ]);
+
+        $stmt = $pdo->prepare('SELECT 1 FROM LopSinhHoat WHERE lower(MaLop) = lower(:ma_lop) LIMIT 1');
+        $stmt->execute([':ma_lop' => $maLop]);
+        if (!$stmt->fetchColumn()) {
+            throw new RuntimeException('Ma lop sinh hoat khong ton tai.');
+        }
     }
 
     public static function create(array $data)
@@ -117,13 +110,22 @@ class Student
     public static function insertWithPdo(PDO $pdo, array $data): int
     {
         self::ensureSchema($pdo);
-        self::ensureLop($pdo, (string)($data['class_name'] ?? ''), (string)($data['faculty'] ?? ''));
+        self::ensureLopExists($pdo, (string)($data['class_name'] ?? ''));
+
+        $cccd = trim((string)($data['cccd'] ?? ''));
+        $email = trim((string)($data['email'] ?? ''));
+        if ($cccd === '') {
+            throw new RuntimeException('CCCD la bat buoc.');
+        }
+        if ($email === '') {
+            throw new RuntimeException('Email la bat buoc.');
+        }
 
         $stmt = $pdo->prepare(
             'INSERT INTO SinhVien (
-                MaSV, HoTen, NgaySinh, GioiTinh, DiaChi, SoDienThoai, Email, MaLop, NgayNhapHoc, TrangThai, Avatar, CreatedAt
+                MaSV, HoTen, NgaySinh, GioiTinh, CCCD, DiaChi, SoDienThoai, Email, MaLop, NgayNhapHoc, TrangThai, Avatar, CreatedAt
             ) VALUES (
-                :ma_sv, :ho_ten, :ngay_sinh, :gioi_tinh, :dia_chi, :so_dien_thoai, :email, :ma_lop, :ngay_nhap_hoc, :trang_thai, :avatar, CURRENT_TIMESTAMP
+                :ma_sv, :ho_ten, :ngay_sinh, :gioi_tinh, :cccd, :dia_chi, :so_dien_thoai, :email, :ma_lop, :ngay_nhap_hoc, :trang_thai, :avatar, CURRENT_TIMESTAMP
             )'
         );
         $stmt->execute([
@@ -131,11 +133,12 @@ class Student
             ':ho_ten' => $data['full_name'],
             ':ngay_sinh' => $data['date_of_birth'] ?: null,
             ':gioi_tinh' => $data['gender'] ?: null,
-            ':dia_chi' => null,
+            ':cccd' => $cccd,
+            ':dia_chi' => trim((string)($data['address'] ?? '')) ?: null,
             ':so_dien_thoai' => $data['phone'] ?: null,
-            ':email' => $data['email'] ?: null,
+            ':email' => $email,
             ':ma_lop' => $data['class_name'] ?: null,
-            ':ngay_nhap_hoc' => null,
+            ':ngay_nhap_hoc' => trim((string)($data['ngay_nhap_hoc'] ?? '')) ?: null,
             ':trang_thai' => $data['status'] ?: 'Đang học',
             ':avatar' => $data['avatar'] ?: null,
         ]);
@@ -151,6 +154,8 @@ class Student
             'full_name' => $row['HoTen'] ?? '',
             'date_of_birth' => $row['NgaySinh'] ?? '',
             'gender' => $row['GioiTinh'] ?? '',
+            'cccd' => $row['CCCD'] ?? '',
+            'address' => $row['DiaChi'] ?? '',
             'class_name' => $row['MaLop'] ?? '',
             'faculty' => $row['TenNganh'] ?? '',
             'email' => $row['Email'] ?? '',
@@ -240,7 +245,7 @@ class Student
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        self::ensureLop($pdo, (string)($data['class_name'] ?? ''), (string)($data['faculty'] ?? ''));
+        self::ensureLopExists($pdo, (string)($data['class_name'] ?? ''));
         $stmt = $pdo->prepare(
             'UPDATE SinhVien
              SET HoTen = :ho_ten,
