@@ -132,6 +132,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: Composer install (if configured)
+        shell: bash
+        run: |
+          if [ -f api/composer.json ]; then
+            rm -rf api/vendor
+            composer install --no-interaction --prefer-dist --optimize-autoloader --working-dir=api
+            composer dump-autoload -o --working-dir=api
+          else
+            echo "Skip Composer install (no composer.json)."
+          fi
       - uses: actions/setup-node@v4
         with:
           node-version: '18'
@@ -148,21 +161,40 @@ jobs:
         run: |
           # create session save dir and start server in background
           TMP_SESSION=$(mktemp -d)
-          php -d session.save_path="$TMP_SESSION" -S 127.0.0.1:8001 -t api > /dev/null 2>&1 &
-          echo $! > /tmp/php-server.pid
-          echo "Started php - PID $(cat /tmp/php-server.pid)"
+          echo "Session dir: $TMP_SESSION"
+          echo "Starting PHP server on 127.0.0.1:8001 with document root: api"
+          php -d session.save_path="$TMP_SESSION" -S 127.0.0.1:8001 -t api > /tmp/php-server.log 2>&1 &
+          SERVER_PID=$!
+          echo $SERVER_PID > /tmp/php-server.pid
+          echo "Started PHP server - PID $SERVER_PID"
+          sleep 2
+          if ! ps -p $SERVER_PID > /dev/null; then
+            echo "ERROR: PHP server process died"
+            cat /tmp/php-server.log
+            exit 1
+          fi
+          echo "PHP server process is running"
       - name: Wait for API server to be ready
         shell: bash
         run: |
-          for i in {1..20}; do
-            if curl -sSf http://127.0.0.1:8001/ >/dev/null 2>&1; then
-              echo "API server ready"
-              exit 0
+          SERVER_PID=$(cat /tmp/php-server.pid)
+          echo "Checking if server (PID $SERVER_PID) is responding..."
+          for i in {1..30}; do
+            if ps -p $SERVER_PID > /dev/null 2>&1; then
+              if curl -sSf http://127.0.0.1:8001/ >/dev/null 2>&1; then
+                echo "✓ API server ready at http://127.0.0.1:8001"
+                exit 0
+              fi
+            else
+              echo "ERROR: Server process $SERVER_PID died"
+              [ -f /tmp/php-server.log ] && cat /tmp/php-server.log
+              exit 1
             fi
-            echo "Waiting for API server... ($i)"
+            echo "Waiting for API server... ($i/30)"
             sleep 1
           done
-          echo "API server did not start" >&2
+          echo "ERROR: API server did not respond after 30 seconds" >&2
+          [ -f /tmp/php-server.log ] && cat /tmp/php-server.log
           exit 1
       - name: Run Newman with retry
         working-directory: tests/postman
