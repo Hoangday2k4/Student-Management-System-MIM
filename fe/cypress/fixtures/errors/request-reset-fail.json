@@ -1,0 +1,6 @@
+{
+  "error": "Gửi yêu cầu thất bại.",
+  "fields": {
+    "login_id": "Login ID không tồn tại."
+  }
+}

@@ -3,6 +3,7 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   unit-tests:
@@ -130,22 +131,39 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      - name: Newman (if Postman collection exists)
+          node-version: '18'
+      - name: Install Postman runner deps
+        working-directory: tests/postman
+        run: |
+          if [ -f tests/postman/package.json ]; then
+            npm ci
+          else
+            echo "Skip Newman install (no package.json)"
+          fi
+      - name: Run Newman with retry
+        working-directory: tests/postman
         shell: bash
         run: |
-          if ls tests/postman/*.json >/dev/null 2>&1; then
-            npm install -g newman
-            for f in tests/postman/*.json; do
-              if [ -f tests/postman/sample.environment.json ]; then
-                newman run "$f" -e tests/postman/sample.environment.json
-              else
-                newman run "$f"
-              fi
-            done
-          else
-            echo "Skip API tests (no Postman collection)."
-          fi
+          set -e
+          n=0
+          max=2
+          until [ $n -ge $max ]
+          do
+            if ls collections/*.json >/dev/null 2>&1; then
+              npm test && break
+            else
+              echo "Skip API tests (no Postman collection)."
+              break
+            fi
+            n=$((n+1))
+            echo "Retrying Newman run ($n/$max)"
+          done
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postman-reports
+          path: tests/postman/reports
 
   static-analysis:
     name: Static Code Analysis

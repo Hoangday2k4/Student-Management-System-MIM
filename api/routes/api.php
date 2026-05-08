@@ -4,6 +4,7 @@ return [
     'GET' => [
         '/home' => ['/home.php', null, null],
         '/get_config' => ['/get_config.php', null, null],
+        '/reset_list' => ['/reset_list.php', null, null],
         '/students' => ['/student.php', null, null],
         '/students/import' => ['/student_import.php', null, null],
         '/students/detail' => ['/student_detail.php', null, null],
@@ -74,6 +75,8 @@ return [
         '/class.php' => ['/class.php', null, null],
         '/score.php' => ['/score.php', null, null],
         '/score_detail.php' => ['/score_detail.php', null, null],
+        '/request_reset' => ['/request_reset.php', null, null],
+        '/reset_password' => ['/reset_password.php', null, null],
         '/change-password' => ['/change_password.php', null, null],
         '/login' => ['/login.php', null, null],
         '/logout' => ['/logout.php', null, null],
