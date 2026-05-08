@@ -18,7 +18,9 @@ jobs:
         shell: bash
         run: |
           if [ -f api/composer.json ]; then
-            composer install --no-interaction --prefer-dist --working-dir=api
+            rm -rf api/vendor
+            composer install --no-interaction --prefer-dist --optimize-autoloader --working-dir=api
+            composer dump-autoload -o --working-dir=api
           else
             echo "Skip Composer install (no composer.json)."
           fi
@@ -61,7 +63,9 @@ jobs:
         shell: bash
         run: |
           if [ -f api/composer.json ]; then
-            composer install --no-interaction --prefer-dist --working-dir=api
+            rm -rf api/vendor
+            composer install --no-interaction --prefer-dist --optimize-autoloader --working-dir=api
+            composer dump-autoload -o --working-dir=api
           else
             echo "Skip Composer install (no composer.json)."
           fi
@@ -88,17 +92,15 @@ jobs:
       - name: E2E (Cypress/Selenium if configured)
         shell: bash
         run: |
-          if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s['e2e']||s['cy:run']?0:1)"; then
-            pnpm -C fe install
-            pnpm -C fe run dev -- --host 0.0.0.0 --port 5173 &
-            node -e "const http=require('http');const start=Date.now();(function check(){http.get('http://127.0.0.1:5173',res=>{res.destroy();console.log('Vite is up');}).on('error',()=>{if(Date.now()-start>60000){console.error('Vite did not start in time');process.exit(1);}setTimeout(check,1000);});})();"
-            if pnpm -C fe run e2e; then
-              exit 0
-            fi
-            pnpm -C fe run cy:run
-          else
-            echo "Skip E2E tests (no e2e script)."
+          if [ ! -f fe/package.json ]; then
+            echo "Skip E2E tests (no fe/package.json)."
+            exit 0
           fi
+
+          pnpm -C fe install
+          pnpm -C fe run dev -- --host 0.0.0.0 --port 5173 &
+          node -e "const http=require('http');const start=Date.now();(function check(){http.get('http://127.0.0.1:5173',res=>{res.destroy();console.log('Vite is up');}).on('error',()=>{if(Date.now()-start>60000){console.error('Vite did not start in time');process.exit(1);}setTimeout(check,1000);});})();"
+          pnpm -C fe run test:e2e
 
   ui-tests:
     name: UI / Frontend Tests
@@ -135,8 +137,8 @@ jobs:
       - name: Install Postman runner deps
         working-directory: tests/postman
         run: |
-          if [ -f tests/postman/package.json ]; then
-            npm ci
+          if [ -f package.json ]; then
+            npm install --no-fund --no-audit
           else
             echo "Skip Newman install (no package.json)"
           fi
@@ -144,20 +146,12 @@ jobs:
         working-directory: tests/postman
         shell: bash
         run: |
-          set -e
-          n=0
-          max=2
-          until [ $n -ge $max ]
-          do
-            if ls collections/*.json >/dev/null 2>&1; then
-              npm test && break
-            else
-              echo "Skip API tests (no Postman collection)."
-              break
-            fi
-            n=$((n+1))
-            echo "Retrying Newman run ($n/$max)"
-          done
+          if [ ! -f collections/student-management-api.postman_collection.json ]; then
+            echo "Skip API tests (no Postman collection)."
+            exit 0
+          fi
+
+          npm test
       - name: Upload reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -177,7 +171,9 @@ jobs:
         shell: bash
         run: |
           if [ -f api/composer.json ]; then
-            composer install --no-interaction --prefer-dist --working-dir=api
+            rm -rf api/vendor
+            composer install --no-interaction --prefer-dist --optimize-autoloader --working-dir=api
+            composer dump-autoload -o --working-dir=api
           else
             echo "Skip Composer install (no composer.json)."
           fi

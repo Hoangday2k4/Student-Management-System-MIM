@@ -1,2 +1,3 @@
 api/config_env.php
 api/storage/*.sqlite
+api/vendor/

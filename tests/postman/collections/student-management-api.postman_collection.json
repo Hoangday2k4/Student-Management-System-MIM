@@ -39,8 +39,7 @@
           "if (token && token !== '') {",
           "  pm.request.headers.add({key: 'Authorization', value: 'Bearer ' + token});",
           "} else {",
-          "  var cookie = pm.environment.get(keys.cookieKey);
-",
+          "  var cookie = pm.environment.get(keys.cookieKey);",
           "  if (cookie && cookie !== '') { pm.request.headers.add({key: 'Cookie', value: cookie}); }",
           "}",
           "// allow tests to override by setting pm.environment.set('auth_skip','true')",
