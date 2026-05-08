@@ -143,6 +143,27 @@ jobs:
           else
             echo "Skip Newman install (no package.json)"
           fi
+      - name: Start PHP built-in server for API tests
+        shell: bash
+        run: |
+          # create session save dir and start server in background
+          TMP_SESSION=$(mktemp -d)
+          php -d session.save_path="$TMP_SESSION" -S 127.0.0.1:8001 -t api > /dev/null 2>&1 &
+          echo $! > /tmp/php-server.pid
+          echo "Started php - PID $(cat /tmp/php-server.pid)"
+      - name: Wait for API server to be ready
+        shell: bash
+        run: |
+          for i in {1..20}; do
+            if curl -sSf http://127.0.0.1:8001/ >/dev/null 2>&1; then
+              echo "API server ready"
+              exit 0
+            fi
+            echo "Waiting for API server... ($i)"
+            sleep 1
+          done
+          echo "API server did not start" >&2
+          exit 1
       - name: Run Newman with retry
         working-directory: tests/postman
         shell: bash
