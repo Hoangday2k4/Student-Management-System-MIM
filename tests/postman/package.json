@@ -10,7 +10,7 @@
   "devDependencies": {
     "newman": "^6.0.0",
     "newman-reporter-htmlextra": "^1.21.0",
-    "newman-reporter-junitfull": "^1.2.0"
+    "newman-reporter-junitfull": "^1.1.0"
     ,"node-fetch": "^2.6.7",
     "minimist": "^1.2.8"
   }
