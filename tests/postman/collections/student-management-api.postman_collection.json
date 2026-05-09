@@ -12,6 +12,47 @@
   ],
   "item": [
     {
+      "name": "Admin - Unauthenticated student list returns 401",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": { "raw": "{{base_url}}/student.php", "host": ["{{base_url}}"], "path": ["student.php"] }
+      },
+      "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('unauthenticated returns 401', function(){ pm.response.to.have.status(401); });"
+      ] } } ]
+    },
+    {
+      "name": "Auth / Login - Wrong Password",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "login_id", "value": "admin" },
+            { "key": "password", "value": "wrongpassword" }
+          ]
+        },
+        "url": { "raw": "{{base_url}}/login.php", "host": ["{{base_url}}"], "path": ["login.php"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('wrong password returns 200', function(){ pm.response.to.have.status(200); });",
+              "pm.test('wrong password response has error status', function(){",
+              "  var body = pm.response.json();",
+              "  pm.expect(body.status).to.equal('error');",
+              "});"
+            ]
+          }
+        }
+      ]
+    },
+    {
       "name": "Auth / Login - Admin (session cookie)",
       "request": {
         "method": "POST",
@@ -31,21 +72,70 @@
           "script": {
             "type": "text/javascript",
             "exec": [
-              "pm.test('login returns 200 or 302', function(){ pm.expect(pm.response.code).to.be.oneOf([200,302]); });",
-              "var setCookie = pm.response.headers.get('Set-Cookie'); if (setCookie) { var m = setCookie.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_admin', m[0]); }"
+              "pm.test('login returns 200', function(){ pm.response.to.have.status(200); });",
+              "pm.test('login response is success', function(){",
+              "  var body = pm.response.json();",
+              "  pm.expect(body.status).to.equal('success');",
+              "});",
+              "var setCookie = pm.response.headers.get('Set-Cookie');",
+              "if (setCookie) { var m = setCookie.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_admin', m[0]); }"
             ]
           }
         }
       ]
     },
     {
-      "name": "Admin - List Students (pagination)",
+      "name": "Admin - List Students (authenticated)",
       "request": {
         "method": "GET",
         "header": [ { "key": "Cookie", "value": "{{session_admin}}" } ],
         "url": { "raw": "{{base_url}}/student.php?page=1&per_page=10", "host": ["{{base_url}}"], "path": ["student.php"], "query": [ { "key": "page", "value": "1" }, { "key": "per_page", "value": "10" } ] }
       },
-      "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [ "pm.test('status is 200 or 4xx', function(){ pm.expect(pm.response.code).to.be.oneOf([200,400,401,403,404]); });" ] } } ]
+      "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('authenticated list returns 200', function(){ pm.response.to.have.status(200); });"
+      ] } } ]
+    },
+    {
+      "name": "Auth / Login - Teacher",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "urlencoded",
+          "urlencoded": [
+            { "key": "login_id", "value": "{{teacher_user}}" },
+            { "key": "password", "value": "{{teacher_pass}}" }
+          ]
+        },
+        "url": { "raw": "{{base_url}}/login.php", "host": ["{{base_url}}"], "path": ["login.php"] }
+      },
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('teacher login returns 200', function(){ pm.response.to.have.status(200); });",
+              "var body = pm.response.json();",
+              "if (body.status === 'success') {",
+              "  var setCookie = pm.response.headers.get('Set-Cookie');",
+              "  if (setCookie) { var m = setCookie.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_teacher', m[0]); }",
+              "}"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Admin - Logout",
+      "request": {
+        "method": "POST",
+        "header": [ { "key": "Cookie", "value": "{{session_admin}}" } ],
+        "url": { "raw": "{{base_url}}/logout.php", "host": ["{{base_url}}"], "path": ["logout.php"] }
+      },
+      "event": [ { "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('logout returns 200 or 302', function(){ pm.expect(pm.response.code).to.be.oneOf([200, 302]); });"
+      ] } } ]
     }
   ]
 }

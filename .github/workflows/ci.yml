@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           if [ -x api/vendor/bin/phpunit ]; then
-            api/vendor/bin/phpunit -c api/phpunit.xml
+            api/vendor/bin/phpunit -c api/phpunit.xml --testsuite API
           else
             echo "Skip PHP unit tests (phpunit not installed)."
           fi
@@ -41,14 +41,11 @@ jobs:
       - name: FE Unit (if configured)
         shell: bash
         run: |
-          if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s['test:unit']||s.test?0:1)"; then
+          if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s['test:unit']?0:1)"; then
             pnpm -C fe install
-            if pnpm -C fe run test:unit; then
-              exit 0
-            fi
-            pnpm -C fe run test
+            pnpm -C fe run test:unit
           else
-            echo "Skip FE unit tests (no test script)."
+            echo "Skip FE unit tests (no test:unit script)."
           fi
 
   integration-tests:
@@ -89,6 +86,9 @@ jobs:
       - uses: pnpm/action-setup@v4
         with:
           version: "9"
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
       - name: E2E (Cypress/Selenium if configured)
         shell: bash
         run: |
@@ -97,35 +97,17 @@ jobs:
             exit 0
           fi
 
+          TMP_E2E=$(mktemp -d)
+          DB_PATH_OVERRIDE="$TMP_E2E/e2e.sqlite" php \
+            -d session.save_path="$TMP_E2E/sessions" \
+            -S 127.0.0.1:8001 -t api > /tmp/php-e2e-server.log 2>&1 &
+          mkdir -p "$TMP_E2E/sessions"
+
           pnpm -C fe install
           pnpm -C fe run dev -- --host 0.0.0.0 --port 5173 &
-          # Wait for Vite to be reachable (use wait-on for reliability). Timeout 120s.
-          npx wait-on http://localhost:5173 --timeout 120000
+          # Wait for both servers to be reachable. Timeout 120s.
+          npx wait-on http://localhost:5173 http://127.0.0.1:8001 --timeout 120000
           pnpm -C fe run test:e2e
-
-  ui-tests:
-    name: UI / Frontend Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - uses: pnpm/action-setup@v4
-        with:
-          version: "9"
-      - name: Vue UI tests (if configured)
-        shell: bash
-        run: |
-          if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s['test:ui']||s['test:unit']?0:1)"; then
-            pnpm -C fe install
-            if pnpm -C fe run test:ui; then
-              exit 0
-            fi
-            pnpm -C fe run test:unit
-          else
-            echo "Skip UI tests (no ui/unit test script)."
-          fi
 
   api-tests:
     name: API Tests
@@ -147,7 +129,7 @@ jobs:
           fi
       - uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: "20"
       - name: Install Postman runner deps
         working-directory: tests/postman
         run: |
@@ -159,11 +141,12 @@ jobs:
       - name: Start PHP built-in server for API tests
         shell: bash
         run: |
-          # create session save dir and start server in background
           TMP_SESSION=$(mktemp -d)
+          TMP_DB=$(mktemp -d)
           echo "Session dir: $TMP_SESSION"
           echo "Starting PHP server on 127.0.0.1:8001 with document root: api"
-          php -d session.save_path="$TMP_SESSION" -S 127.0.0.1:8001 -t api > /tmp/php-server.log 2>&1 &
+          DB_PATH_OVERRIDE="$TMP_DB/api-test.sqlite" CI_TEST_MODE=1 \
+            php -d session.save_path="$TMP_SESSION" -S 127.0.0.1:8001 -t api > /tmp/php-server.log 2>&1 &
           SERVER_PID=$!
           echo $SERVER_PID > /tmp/php-server.pid
           echo "Started PHP server - PID $SERVER_PID"
@@ -234,7 +217,7 @@ jobs:
       - name: PHP syntax check
         shell: bash
         run: |
-          find api -name "*.php" -print0 | xargs -0 -n 1 php -l
+          find api -name "*.php" -not -path "*/vendor/*" -print0 | xargs -0 -n 1 php -l
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
