@@ -91,6 +91,8 @@ jobs:
           php-version: "8.2"
       - name: E2E (Cypress/Selenium if configured)
         shell: bash
+        env:
+          CI_TEST_MODE: "1"
         run: |
           if [ ! -f fe/package.json ]; then
             echo "Skip E2E tests (no fe/package.json)."
@@ -98,15 +100,15 @@ jobs:
           fi
 
           TMP_E2E=$(mktemp -d)
-          DB_PATH_OVERRIDE="$TMP_E2E/e2e.sqlite" php \
-            -d session.save_path="$TMP_E2E/sessions" \
-            -S 127.0.0.1:8001 -t api > /tmp/php-e2e-server.log 2>&1 &
           mkdir -p "$TMP_E2E/sessions"
+          DB_PATH_OVERRIDE="$TMP_E2E/e2e.sqlite" \
+            php -d session.save_path="$TMP_E2E/sessions" \
+            -S 127.0.0.1:8001 -t api > /tmp/php-e2e-server.log 2>&1 &
 
-          pnpm -C fe install
+          pnpm -C fe install --frozen-lockfile
           pnpm -C fe run dev -- --host 0.0.0.0 --port 5173 &
-          # Wait for both servers to be reachable. Timeout 120s.
-          npx wait-on http://localhost:5173 http://127.0.0.1:8001 --timeout 120000
+          # Cypress tests mock all API calls via cy.intercept(); only Vite needs to be ready.
+          npx wait-on http://localhost:5173 --timeout 120000
           pnpm -C fe run test:e2e
 
   api-tests:
@@ -230,7 +232,7 @@ jobs:
         shell: bash
         run: |
           if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s.lint?0:1)"; then
-            pnpm -C fe install
+            pnpm -C fe install --frozen-lockfile
             pnpm -C fe run lint
           else
             echo "Skip ESLint (no lint script)."
