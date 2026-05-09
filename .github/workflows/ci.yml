@@ -181,19 +181,6 @@ jobs:
           echo "ERROR: API server did not respond after 30 seconds" >&2
           [ -f /tmp/php-server.log ] && cat /tmp/php-server.log
           exit 1
-      - name: Debug - test login endpoint
-        shell: bash
-        run: |
-          echo "=== Testing login endpoint ==="
-          curl -sv -X POST http://127.0.0.1:8001/login.php \
-            -d "login_id=admin&password=123456" \
-            -H "Content-Type: application/x-www-form-urlencoded" 2>&1
-          echo ""
-          echo "=== Testing unauthenticated student.php ==="
-          curl -sv http://127.0.0.1:8001/student.php 2>&1
-          echo ""
-          echo "=== PHP server log ==="
-          cat /tmp/php-server.log || echo "(no log)"
       - name: Run Newman with retry
         working-directory: tests/postman
         shell: bash
