@@ -901,19 +901,19 @@ class Course
 
     public static function deleteSubjectByCodeWithPdo(PDO $pdo, string $courseCode): void
     {
-        self::ensureSchema($pdo);
-        $courseCode = strtoupper(trim($courseCode));
+        // Caller is responsible for calling ensureSchema before starting a transaction
+        $courseCode = trim($courseCode);
         if ($courseCode === '') {
             throw new RuntimeException('Thiếu mã môn học.');
         }
 
-        $stmt = $pdo->prepare('SELECT COUNT(1) FROM LopHocPhan WHERE MaMon = :ma_mon');
+        $stmt = $pdo->prepare('SELECT COUNT(1) FROM LopHocPhan WHERE upper(MaMon) = upper(:ma_mon)');
         $stmt->execute([':ma_mon' => $courseCode]);
         if ((int)$stmt->fetchColumn() > 0) {
             throw new RuntimeException('Không thể xóa môn học vì đã có lớp học phần.');
         }
 
-        $del = $pdo->prepare('DELETE FROM MonHoc WHERE MaMon = :ma_mon');
+        $del = $pdo->prepare('DELETE FROM MonHoc WHERE upper(MaMon) = upper(:ma_mon)');
         $del->execute([':ma_mon' => $courseCode]);
         if ($del->rowCount() < 1) {
             throw new RuntimeException('Không tìm thấy môn học.');
@@ -974,12 +974,12 @@ class Course
             throw new RuntimeException('Thiếu mã môn học gốc.');
         }
 
-        $current = self::findSubjectByCode($originalCode);
+        $current = self::findSubjectByCode($originalCode, $pdo);
         if (!$current) {
             throw new RuntimeException('Không tìm thấy môn học.');
         }
 
-        $newCode = strtoupper(trim((string)($data['course_code'] ?? '')));
+        $newCode = trim((string)($data['course_code'] ?? ''));
         $newName = trim((string)($data['course_name'] ?? ''));
         $creditsRaw = trim((string)($data['credits'] ?? ''));
         $departmentRaw = trim((string)($data['department'] ?? ''));
@@ -1034,11 +1034,15 @@ class Course
             ]);
         }
 
-        $updated = self::findSubjectByCode($newCode);
-        if (!$updated) {
-            throw new RuntimeException('Không thể đọc lại dữ liệu môn học sau cập nhật.');
-        }
-        return $updated;
+        // Return updated data directly to avoid a second complex query inside the transaction
+        return [
+            'course_code'     => $newCode,
+            'course_name'     => $newName,
+            'credits'         => (int)$creditsRaw,
+            'course_type'     => self::normalizeCourseType($courseType),
+            'department_code' => (string)($departmentCode ?? ''),
+            'department_name' => (string)($current['department_name'] ?? ''),
+        ];
     }
 
     public static function listByTeacherCode(string $teacherCode): array
