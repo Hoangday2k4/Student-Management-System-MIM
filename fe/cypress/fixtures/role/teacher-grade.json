@@ -1,0 +1,31 @@
+{
+  "status": "success",
+  "data": {
+    "id": 201,
+    "course_code": "INT201",
+    "course_name": "Cau truc du lieu",
+    "teacher_name": "Test Teacher",
+    "credits": 3,
+    "weight_cc": 30,
+    "weight_gk": 30,
+    "weight_ck": 40
+  },
+  "students": [
+    {
+      "student_code": "S001",
+      "full_name": "Test Student 1",
+      "class_name": "CTK42",
+      "cc": 8,
+      "gk": 7.5,
+      "ck": 9
+    },
+    {
+      "student_code": "S002",
+      "full_name": "Test Student 2",
+      "class_name": "CTK42",
+      "cc": 6,
+      "gk": 7,
+      "ck": 8
+    }
+  ]
+}

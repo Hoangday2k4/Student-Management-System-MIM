@@ -1,0 +1,443 @@
+<script setup>
+import { onMounted, reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+
+const loading = ref(false)
+const deletingCode = ref('')
+const searched = ref(false)
+const errorMessage = ref('')
+const successMessage = ref('')
+const rows = ref([])
+
+const summary = reactive({
+  total: 0,
+})
+
+const filters = reactive({
+  keyword: '',
+})
+
+function classBadge(name, code) {
+  const value = String(name || code || '').trim()
+  if (!value) return 'LH'
+  const parts = value.split(/\s+/).filter(Boolean)
+  if (parts.length >= 2) return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase()
+  return value.slice(0, 2).toUpperCase()
+}
+
+function goCreate() {
+  router.push({ name: 'class-form', query: { mode: 'create' } })
+}
+
+function goEdit(row) {
+  router.push({ name: 'class-form', query: { mode: 'edit', code: row.code } })
+}
+
+async function loadData() {
+  loading.value = true
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    const params = new URLSearchParams()
+    if (filters.keyword.trim()) params.append('keyword', filters.keyword.trim())
+    const url = params.toString() ? `/api/classes?${params.toString()}` : '/api/classes'
+    const res = await fetch(url)
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok || payload.status !== 'success') {
+      errorMessage.value = payload.message || 'Không thể tải danh sách lớp.'
+      rows.value = []
+      return
+    }
+    rows.value = Array.isArray(payload.data) ? payload.data : []
+    summary.total = Number(payload.summary?.total || 0)
+    searched.value = true
+  } catch (error) {
+    errorMessage.value = 'Không kết nối được máy chủ.'
+    rows.value = []
+  } finally {
+    loading.value = false
+  }
+}
+
+async function deleteClass(row) {
+  const code = String(row?.code || '').trim()
+  if (!code) return
+  if (!window.confirm(`Bạn có chắc muốn xóa lớp ${code}?`)) return
+
+  deletingCode.value = code
+  errorMessage.value = ''
+  successMessage.value = ''
+  try {
+    const res = await fetch(`/api/classes?code=${encodeURIComponent(code)}`, { method: 'DELETE' })
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok || payload.status !== 'success') {
+      errorMessage.value = payload.message || 'Không thể xóa lớp.'
+      return
+    }
+    successMessage.value = 'Đã xóa lớp.'
+    await loadData()
+  } catch (error) {
+    errorMessage.value = 'Không kết nối được máy chủ.'
+  } finally {
+    deletingCode.value = ''
+  }
+}
+
+onMounted(loadData)
+</script>
+
+<template>
+  <div class="page">
+    <div class="card">
+      <div class="header-row">
+        <div>
+          <h1>Quản lý lớp</h1>
+          <p class="subtitle">Quản lý danh sách các lớp học.</p>
+        </div>
+        <button class="btn-add" type="button" @click="goCreate">+ Thêm lớp mới</button>
+      </div>
+
+      <div class="stats-grid">
+        <article class="stat-card">
+          <div class="stat-label">Tổng số lớp</div>
+          <div class="stat-value">{{ summary.total }}</div>
+        </article>
+      </div>
+
+      <div class="toolbar">
+        <input
+          v-model="filters.keyword"
+          type="text"
+          placeholder="Tìm kiếm theo tên lớp hoặc mã lớp..."
+          @keyup.enter="loadData"
+        />
+        <button class="btn-primary" type="button" @click="loadData">Tra cứu</button>
+      </div>
+
+      <p v-if="successMessage" class="success">{{ successMessage }}</p>
+      <p v-if="errorMessage" class="error">{{ errorMessage }}</p>
+
+      <div class="table-wrap">
+        <div v-if="loading" class="state">Đang tải dữ liệu...</div>
+        <div v-else-if="searched && rows.length === 0" class="state">Không có lớp phù hợp.</div>
+
+        <div v-else class="table-scroll">
+          <table class="result-table">
+            <thead>
+              <tr>
+                <th>Lớp học</th>
+                <th>Khoa/Đơn vị</th>
+                <th>GVCN</th>
+                <th>SV</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in rows" :key="row.code">
+                <td>
+                  <div class="class-info">
+                    <span class="class-badge">{{ classBadge(row.name, row.code) }}</span>
+                    <div>
+                      <div class="class-name">{{ row.name || row.code }}</div>
+                      <div class="class-sub">Mã: {{ row.code }}</div>
+                    </div>
+                  </div>
+                </td>
+                <td>
+                  <div class="major-chip">{{ row.major_name || row.major_code || '-' }}</div>
+                  <div class="class-sub">{{ row.faculty_name || '-' }}</div>
+                </td>
+                <td>
+                  <div>{{ row.head_teacher_name || '-' }}</div>
+                  <div class="class-sub">{{ row.head_teacher_code || '-' }}</div>
+                </td>
+                <td>{{ row.student_count || 0 }}</td>
+                <td class="action-cell">
+                  <button class="icon-btn" type="button" title="Cập nhật" @click="goEdit(row)">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="m16.9 3.3 3.8 3.8a1.2 1.2 0 0 1 0 1.7L10 19.5l-4.8 1.2a.9.9 0 0 1-1.1-1.1L5.3 15 15.2 5a1.2 1.2 0 0 1 1.7 0zm-9.8 13 .8 2.9 2.9-.8 8.9-8.9-2.9-2.9-9 8.9z" />
+                    </svg>
+                  </button>
+                  <button
+                    class="icon-btn danger-btn"
+                    type="button"
+                    :disabled="deletingCode === row.code"
+                    title="Xóa lớp"
+                    @click="deleteClass(row)"
+                  >
+                    <svg viewBox="0 0 16 16" aria-hidden="true">
+                      <path d="M5.5 5.5A.5.5 0 0 1 6 6v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5" />
+                      <path d="M8 5.5a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5" />
+                      <path d="M10.5 5.5a.5.5 0 0 1 .5.5v6a.5.5 0 0 1-1 0V6a.5.5 0 0 1 .5-.5" />
+                      <path fill-rule="evenodd" d="M14.5 3a1 1 0 0 1-1 1H13v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V4h-.5a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1H6a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1zM4.118 4 4 4.059V13a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V4.059L11.882 4zM2.5 3h11V2h-11z" />
+                    </svg>
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style scoped>
+.page {
+  height: 100%;
+}
+
+.card {
+  max-width: 1300px;
+  height: 100%;
+  min-height: 0;
+  margin: 0;
+  background: #fff;
+  border: 1px solid #cfcfcf;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+h1 {
+  margin: 0;
+  color: #007336;
+}
+
+.subtitle {
+  margin: 5px 0 0;
+  color: #2f4565;
+}
+
+.btn-add {
+  border: none;
+  border-radius: 8px;
+  background: #0f8f54;
+  color: #fff;
+  padding: 10px 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  border: 1px solid #d8dee9;
+  border-radius: 12px;
+  background: #fff;
+  padding: 12px 14px;
+}
+
+.stat-label {
+  color: #4a5a72;
+  font-size: 13px;
+}
+
+.stat-value {
+  margin-top: 6px;
+  color: #0c274f;
+  font-size: 34px;
+  line-height: 1;
+  font-weight: 800;
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+}
+
+input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #c7d3e2;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 17px;
+}
+
+.btn-primary {
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #007336;
+  color: #fff;
+}
+
+.success,
+.error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+}
+
+.success {
+  background: #eefaf2;
+  color: #177144;
+}
+
+.error {
+  background: #fdeeee;
+  color: #b72a2a;
+}
+
+.table-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.state {
+  padding: 12px;
+  border-radius: 8px;
+  background: #f4f7fc;
+  color: #607086;
+}
+
+.table-scroll {
+  overflow: auto;
+  min-height: 0;
+  flex: 1;
+  max-height: 380px;
+}
+
+.result-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.result-table th,
+.result-table td {
+  border-bottom: 1px solid #e3e9f2;
+  padding: 10px 8px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.result-table th {
+  background: #f0f5fc;
+  color: #2f4565;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.class-info {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.class-badge {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #0f8f54, #2f72ff);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.class-name {
+  font-weight: 700;
+}
+
+.class-sub {
+  color: #607086;
+  font-size: 12px;
+}
+
+.major-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #fdecf2;
+  color: #b43262;
+  border: 1px solid #f1c9d9;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.action-cell {
+  white-space: nowrap;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin-right: 8px;
+  border-radius: 8px;
+  border: 1px solid #c7d3e2;
+  background: #f8fbff;
+  color: #007336;
+  font-size: 0;
+  line-height: 0;
+  cursor: pointer;
+}
+
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  fill: currentColor;
+  pointer-events: none;
+}
+
+.icon-btn:hover {
+  background: #eaf5ee;
+  border-color: #9ec7ae;
+}
+
+.danger-btn {
+  color: #b72a2a;
+}
+
+.danger-btn:hover {
+  background: #fdeeee;
+  border-color: #e1aaaa;
+  color: #962020;
+}
+
+.danger-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@media (max-width: 1080px) {
+  .toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .header-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+</style>
+

@@ -1,0 +1,11 @@
+[
+  {
+    "course_code": "INT101",
+    "course_name": "Nhap mon lap trinh",
+    "credits": 3,
+    "department_name": "CNTT",
+    "department_code": "CNTT",
+    "section_count": 1,
+    "student_count": 10
+  }
+]

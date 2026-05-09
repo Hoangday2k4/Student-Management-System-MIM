@@ -1,0 +1,14 @@
+[
+  {
+    "id": 101,
+    "section_code": "INT101-01",
+    "course_code": "INT101",
+    "course_name": "Nhap mon lap trinh",
+    "credits": 3,
+    "teacher_name": "Test Teacher",
+    "teacher_code": "T001",
+    "semester": 1,
+    "academic_year": "2025-2026",
+    "enrolled_count": 10
+  }
+]

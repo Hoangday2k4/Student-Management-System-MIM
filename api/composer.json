@@ -1,0 +1,24 @@
+{
+  "name": "student-management-system/api",
+  "description": "Student Management System PHP API",
+  "type": "project",
+  "require": {
+    "php": "^8.1"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.5"
+  },
+  "autoload": {
+    "classmap": [
+      "app/"
+    ]
+  },
+  "autoload-dev": {
+    "classmap": [
+      "tests/"
+    ]
+  },
+  "config": {
+    "sort-packages": true
+  }
+}

@@ -1,0 +1,1 @@
+This is not a CSV, just text to test invalid MIME handling.

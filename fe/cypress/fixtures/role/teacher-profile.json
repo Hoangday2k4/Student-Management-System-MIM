@@ -1,0 +1,10 @@
+{
+  "data": {
+    "teacher_code": "T001",
+    "full_name": "Test Teacher",
+    "department": "Toán - Cơ - Tin",
+    "email": "t001@example.test",
+    "phone": "0900000002",
+    "status": "Đang công tác"
+  }
+}

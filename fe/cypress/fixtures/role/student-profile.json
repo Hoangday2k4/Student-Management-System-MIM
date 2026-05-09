@@ -1,0 +1,11 @@
+{
+  "data": {
+    "student_code": "S001",
+    "full_name": "Test Student",
+    "class_name": "CTK42",
+    "faculty": "Toán - Cơ - Tin",
+    "email": "s001@example.test",
+    "phone": "0900000001",
+    "status": "Đang học"
+  }
+}
