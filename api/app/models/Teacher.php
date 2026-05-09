@@ -104,10 +104,7 @@ class Teacher
             ':lop_phu_trach' => $data['homeroom_class'] ?: null,
             ':avatar' => $data['avatar'] ?: null,
         ]);
-        $stmt2 = $pdo->prepare('SELECT rowid FROM GiangVien WHERE MaGV = :ma_gv LIMIT 1');
-        $stmt2->execute([':ma_gv' => $data['teacher_code']]);
-        $rid = $stmt2->fetchColumn();
-        return $rid !== false ? (int)$rid : 0;
+        return (int)$pdo->lastInsertId();
     }
 
     public static function findById(int $id)
@@ -118,7 +115,7 @@ class Teacher
             'SELECT g.*, k.TenKhoa
              FROM GiangVien g
              LEFT JOIN Khoa k ON k.MaKhoa = g.MaNganh
-             WHERE g.rowid = :id
+             WHERE rowid = :id
              LIMIT 1'
         );
         $stmt->execute([':id' => $id]);

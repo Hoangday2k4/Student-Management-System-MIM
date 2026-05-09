@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -9,6 +9,9 @@ const loading = ref(true)
 const saving = ref(false)
 const serverMessage = ref('')
 const loadedCode = ref('')
+const classes = ref([])
+const loadingClasses = ref(false)
+const showSuggestions = ref(false)
 
 const form = reactive({
   student_code: '',
@@ -20,6 +23,10 @@ const form = reactive({
   phone: '',
   email: '',
   class_name: '',
+  major: '',
+  major_code: '',
+  major_name: '',
+  faculty_name: '',
   admission_date: '',
   status: 'Đang học',
 })
@@ -91,6 +98,10 @@ async function loadDetail() {
     form.phone = String(data.phone || '')
     form.email = String(data.email || '')
     form.class_name = String(data.class_name || '')
+    form.major = String(data.major || '')
+    form.major_code = String(data.major_code || '')
+    form.major_name = String(data.major_name || '')
+    form.faculty_name = String(data.faculty_name || '')
     form.admission_date = String(data.admission_date || '')
     form.status = String(data.status || 'Đang học') || 'Đang học'
   } catch (error) {
@@ -119,6 +130,7 @@ async function submitForm() {
         phone: form.phone.trim(),
         email: form.email.trim(),
         class_name: form.class_name.trim(),
+        major: form.major.trim(),
         admission_date: form.admission_date,
         status: form.status,
       }),
@@ -145,7 +157,71 @@ async function submitForm() {
   }
 }
 
-onMounted(loadDetail)
+async function loadClassesData() {
+  loadingClasses.value = true
+  try {
+    const res = await fetch('/api/classes')
+    const data = await res.json().catch(() => ({}))
+    console.log('API /api/classes response:', res.status, data)
+    if (res.ok && data.status === 'success' && Array.isArray(data.data)) {
+      classes.value = data.data.map((c) => ({
+        code: String(c.code || '').trim(),
+        name: String(c.name || '').trim(),
+        major_code: String(c.major_code || '').trim(),
+        major_name: String(c.major_name || '').trim(),
+        faculty_name: String(c.faculty_name || '').trim(),
+      }))
+      console.log('Classes loaded:', classes.value)
+    } else {
+      console.warn('API returned error or invalid data:', data)
+    }
+  } catch (err) {
+    console.error('Error loading classes:', err)
+  } finally {
+    loadingClasses.value = false
+  }
+}
+
+watch(() => form.class_name, (newClassName) => {
+  const selected = classes.value.find((c) => c.code === newClassName)
+  if (selected) {
+    form.major = selected.major_code
+    form.major_code = selected.major_code
+    form.major_name = selected.major_name
+    form.faculty_name = selected.faculty_name
+  } else {
+    form.major = ''
+    form.major_code = ''
+    form.major_name = ''
+    form.faculty_name = ''
+  }
+})
+
+const filteredClasses = computed(() => {
+  if (!form.class_name.trim()) return classes.value
+  const searchTerm = form.class_name.toLowerCase()
+  return classes.value.filter((c) => c.code.toLowerCase().includes(searchTerm) || c.name.toLowerCase().includes(searchTerm))
+})
+
+function selectClass(classCode) {
+  form.class_name = classCode
+  showSuggestions.value = false
+}
+
+function handleClassInputFocus() {
+  showSuggestions.value = true
+}
+
+function handleClassInputBlur() {
+  setTimeout(() => {
+    showSuggestions.value = false
+  }, 200)
+}
+
+onMounted(async () => {
+  await loadClassesData()
+  await loadDetail()
+})
 </script>
 
 <template>
@@ -194,10 +270,44 @@ onMounted(loadDetail)
             <p v-if="errors.email" class="error">{{ errors.email }}</p>
           </div>
 
-          <label for="class_name">Lớp *</label>
+          <label for="class_name">Lớp sinh hoạt *</label>
           <div>
-            <input id="class_name" v-model="form.class_name" type="text" maxlength="40" />
+            <input
+              id="class_name"
+              v-model="form.class_name"
+              type="text"
+              maxlength="40"
+              placeholder="Nhập hoặc chọn lớp..."
+              @focus="handleClassInputFocus"
+              @blur="handleClassInputBlur"
+              @input="showSuggestions = true"
+            />
             <p v-if="errors.class_name" class="error">{{ errors.class_name }}</p>
+            <div v-if="showSuggestions && filteredClasses.length > 0" class="class-suggestions">
+              <div
+                v-for="c in filteredClasses"
+                :key="c.code"
+                class="suggestion-item"
+                @click="selectClass(c.code)"
+              >
+                {{ c.code }} - {{ c.name }}
+              </div>
+            </div>
+            <div v-if="showSuggestions && filteredClasses.length === 0 && form.class_name.trim()" class="class-suggestions">
+              <div class="suggestion-item placeholder">Không tìm thấy lớp nào</div>
+            </div>
+          </div>
+
+          <label>Ngành học</label>
+          <div class="readonly-field">
+            <span v-if="form.major_name">{{ form.major_code }} - {{ form.major_name }}</span>
+            <span v-else class="placeholder">-- Chọn lớp để tự động điền ngành --</span>
+          </div>
+
+          <label>Khoa/Đơn vị</label>
+          <div class="readonly-field">
+            <span v-if="form.faculty_name">{{ form.faculty_name }}</span>
+            <span v-else class="placeholder">-- Sẽ tự động điền khi chọn lớp --</span>
           </div>
 
           <label for="admission_date">Ngày nhập học</label>
@@ -269,6 +379,10 @@ label {
   align-self: center;
 }
 
+.grid > div {
+  position: relative;
+}
+
 input,
 select {
   width: 100%;
@@ -327,6 +441,54 @@ button {
   margin-top: 6px;
   color: #c0392b;
   font-size: 13px;
+}
+
+.readonly-field {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #c7d3e2;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  background: #f8f9fa;
+  color: #33435c;
+  min-height: 40px;
+}
+
+.placeholder {
+  color: #999;
+  font-style: italic;
+}
+
+.class-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #c7d3e2;
+  border-radius: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.suggestion-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #e9eef6;
+  font-size: 14px;
+}
+
+.suggestion-item:hover {
+  background: #f5f8fa;
+}
+
+.suggestion-item:last-child {
+  border-bottom: none;
 }
 
 @media (max-width: 900px) {

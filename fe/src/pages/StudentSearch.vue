@@ -30,6 +30,9 @@ const editForm = reactive({
   address: '',
   admission_date: '',
   class_name: '',
+  major: '',
+  major_name: '-',
+  faculty_name: '-',
   email: '',
   phone: '',
   status: 'Đang học',
@@ -130,6 +133,9 @@ function fillEditForm(student) {
   editForm.address = String(student?.address || '')
   editForm.admission_date = String(student?.admission_date || '')
   editForm.class_name = String(student?.class_name || '')
+  editForm.major = String(student?.major || student?.MaNganh || '')
+  editForm.major_name = String(student?.major_name || '-')
+  editForm.faculty_name = String(student?.faculty_name || '-')
   editForm.email = String(student?.email || '')
   editForm.phone = String(student?.phone || '')
   editForm.status = String(student?.status || 'Đang học') || 'Đang học'
@@ -188,6 +194,7 @@ async function saveEdit() {
       address: editForm.address.trim(),
       admission_date: editForm.admission_date.trim(),
       class_name: editForm.class_name.trim(),
+      major: editForm.major.trim(), // THÊM DÒNG NÀY
       email: editForm.email.trim(),
       phone: editForm.phone.trim(),
       status: editForm.status,
@@ -359,6 +366,8 @@ onMounted(async () => {
             <div><b>Giới tính:</b> {{ editForm.gender || '-' }}</div>
             <div><b>Địa chỉ:</b> {{ editForm.address || '-' }}</div>
             <div><b>Lớp:</b> {{ editForm.class_name || '-' }}</div>
+         <div><b>Ngành học:</b> {{ editForm.major_name || '-' }}</div>
+    <div><b>Khoa:</b> {{ editForm.faculty_name || '-' }}</div>
             <div><b>Ngày nhập học:</b> {{ editForm.admission_date || '-' }}</div>
             <div><b>Email:</b> {{ editForm.email || '-' }}</div>
             <div><b>SĐT:</b> {{ editForm.phone || '-' }}</div>

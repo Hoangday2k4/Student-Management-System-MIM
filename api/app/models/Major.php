@@ -103,6 +103,7 @@ class Major
         return $code;
     }
 
+    
     public static function listFacultyOptions(PDO $pdo): array
     {
         Faculty::ensureSchema($pdo);
@@ -374,4 +375,14 @@ class Major
             throw new RuntimeException('Không tìm thấy ngành để xóa.');
         }
     }
+    public static function isLinkedToFaculty(PDO $pdo, string $majorCode): bool
+{
+    $stmt = $pdo->prepare('
+        SELECT 1 FROM Nganh n
+        INNER JOIN Khoa k ON n.MaKhoa = k.MaKhoa
+        WHERE n.MaNganh = :code LIMIT 1
+    ');
+    $stmt->execute([':code' => $majorCode]);
+    return (bool)$stmt->fetchColumn();
+}
 }

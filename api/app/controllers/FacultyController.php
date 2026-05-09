@@ -103,12 +103,6 @@ class FacultyController
             return;
         }
 
-        // For create action, code is required
-        if ($action !== 'update' && $code === '') {
-            jsonResponse(['status' => 'error', 'message' => 'Mã khoa không được để trống.'], 422);
-            return;
-        }
-
         $pdo = get_db_connection();
         $pdo->exec('PRAGMA busy_timeout = 5000');
         Faculty::ensureSchema($pdo);
@@ -139,6 +133,11 @@ class FacultyController
             }
             $pdo->commit();
             jsonResponse(['status' => 'success', 'data' => $saved]);
+        } catch (RuntimeException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
         } catch (PDOException $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -149,11 +148,6 @@ class FacultyController
                 return;
             }
             jsonResponse(['status' => 'error', 'message' => 'Không thể lưu khoa. (' . $message . ')'], 500);
-        } catch (RuntimeException $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
         }
     }
 
@@ -172,11 +166,6 @@ class FacultyController
         $pdo = get_db_connection();
         $pdo->exec('PRAGMA busy_timeout = 5000');
         Faculty::ensureSchema($pdo);
-
-        if (!Faculty::findByCode($code, $pdo)) {
-            jsonResponse(['status' => 'error', 'message' => 'Khoa khong ton tai.'], 404);
-            return;
-        }
 
         try {
             $pdo->beginTransaction();

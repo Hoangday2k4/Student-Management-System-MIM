@@ -107,9 +107,9 @@ class Admin
 
     public static function createAccountWithPdo(PDO $pdo, string $loginId, string $password, string $name = '', string $accountType = 'student'): int
     {
-        self::ensureSchema($pdo);
+        // self::ensureSchema($pdo);
         $stmt = $pdo->prepare(
-            'INSERT OR IGNORE INTO TaiKhoan (LoginId, MatKhau, HoTen, LoaiTaiKhoan, TrangThai, Created)
+            'INSERT INTO TaiKhoan (LoginId, MatKhau, HoTen, LoaiTaiKhoan, TrangThai, Created)
              VALUES (:login_id, :password, :name, :account_type, 1, CURRENT_TIMESTAMP)'
         );
         $stmt->execute([

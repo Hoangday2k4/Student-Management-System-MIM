@@ -57,7 +57,7 @@ function validate() {
     ok = false
   }
   if (!form.department.trim()) {
-    errors.department = 'Hãy nhập khoa/bộ môn.'
+    errors.department = 'Hãy nhập khoa.'
     ok = false
   }
   if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
@@ -187,7 +187,7 @@ async function submitForm() {
           <option value="Nữ">Nữ</option>
         </select>
 
-        <label>Khoa/Bộ môn *</label>
+        <label>Khoa *</label>
         <div>
           <select v-model="form.department">
             <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
@@ -237,7 +237,7 @@ async function submitForm() {
           <span class="label">Họ tên</span><span>{{ form.full_name }}</span>
           <span class="label">Ngày sinh</span><span>{{ form.date_of_birth || '-' }}</span>
           <span class="label">Giới tính</span><span>{{ form.gender }}</span>
-          <span class="label">Khoa/Bộ môn</span><span>{{ form.department }}</span>
+          <span class="label">Khoa</span><span>{{ form.department }}</span>
           <span class="label">Lớp phụ trách</span><span>{{ form.homeroom_class || '-' }}</span>
           <span class="label">Email</span><span>{{ form.email || '-' }}</span>
           <span class="label">Số điện thoại</span><span>{{ form.phone || '-' }}</span>

@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -14,6 +14,12 @@ const bulkSkippedInFile = ref([])
 const bulkResult = ref({ inserted_count: 0, skipped_count: 0, skipped: [] })
 const bulkFileName = ref('')
 
+const majors = ref([])
+const loadingMajors = ref(false)
+const classes = ref([])
+const loadingClasses = ref(false)
+const showSuggestions = ref(false)
+
 const form = reactive({
   student_code: '',
   full_name: '',
@@ -24,6 +30,10 @@ const form = reactive({
   phone: '',
   email: '',
   class_name: '',
+  major: '',
+  major_code: '',
+  major_name: '',
+  faculty_name: '',
   admission_date: '',
   status: 'Đang học',
 })
@@ -35,6 +45,73 @@ const errors = reactive({
   email: '',
 })
 
+async function loadClassesData() {
+  loadingClasses.value = true
+  try {
+    const res = await fetch('/api/classes')
+    const data = await res.json().catch(() => ({}))
+    console.log('API /api/classes response:', res.status, data)
+    if (res.ok && data.status === 'success' && Array.isArray(data.data)) {
+      classes.value = data.data.map((c) => ({
+        code: String(c.code || '').trim(),
+        name: String(c.name || '').trim(),
+        major_code: String(c.major_code || '').trim(),
+        major_name: String(c.major_name || '').trim(),
+        faculty_name: String(c.faculty_name || '').trim(),
+      }))
+      console.log('Classes loaded:', classes.value)
+    } else {
+      console.warn('API returned error or invalid data:', data)
+    }
+  } catch (err) {
+    console.error('Error loading classes:', err)
+  } finally {
+    loadingClasses.value = false
+  }
+}
+
+watch(() => form.class_name, (newClassName) => {
+  const selected = classes.value.find((c) => c.code === newClassName)
+  if (selected) {
+    form.major = selected.major_code
+    form.major_code = selected.major_code
+    form.major_name = selected.major_name
+    form.faculty_name = selected.faculty_name
+  } else {
+    form.major = ''
+    form.major_code = ''
+    form.major_name = ''
+    form.faculty_name = ''
+  }
+})
+
+const filteredClasses = computed(() => {
+  if (!form.class_name.trim()) {
+    console.log('No search term, returning all classes:', classes.value)
+    return classes.value
+  }
+  const searchTerm = form.class_name.toLowerCase()
+  const filtered = classes.value.filter((c) => c.code.toLowerCase().includes(searchTerm) || c.name.toLowerCase().includes(searchTerm))
+  console.log(`Searching for "${form.class_name}" - Found ${filtered.length} matches:`, filtered)
+  return filtered
+})
+
+function selectClass(classCode) {
+  form.class_name = classCode
+  showSuggestions.value = false
+}
+
+function handleClassInputFocus() {
+  showSuggestions.value = true
+  console.log('Input focused, showSuggestions = true, filteredClasses count:', filteredClasses.value.length)
+}
+
+function handleClassInputBlur() {
+  setTimeout(() => {
+    showSuggestions.value = false
+  }, 200)
+}
+
 onMounted(async () => {
   try {
     const res = await fetch('/api/home')
@@ -45,6 +122,8 @@ onMounted(async () => {
     }
     const role = String(data.account_type || '').toLowerCase()
     canCreate.value = role === 'staff' || ['admin', 'manager'].includes(String(data.login_id || '').toLowerCase())
+
+    await loadClassesData()
   } catch (error) {
     router.replace('/login')
   }
@@ -55,6 +134,7 @@ function resetErrors() {
   errors.full_name = ''
   errors.class_name = ''
   errors.email = ''
+  errors.major = ''
 }
 
 function validate() {
@@ -69,7 +149,7 @@ function validate() {
     ok = false
   }
   if (!form.class_name.trim()) {
-    errors.class_name = 'Hãy nhập lớp.'
+    errors.class_name = 'Hãy chọn lớp.'
     ok = false
   }
   if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
@@ -192,7 +272,7 @@ async function submitForm() {
         cccd: form.cccd.trim(),
         address: form.address.trim(),
         admission_date: form.admission_date,
-        faculty: '',
+        major: form.major.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
       }),
@@ -284,14 +364,48 @@ async function submitForm() {
             <p v-if="errors.email" class="error">{{ errors.email }}</p>
           </div>
 
-          <label for="class_name">Lớp *</label>
+          <label for="class_name">Lớp sinh hoạt *</label>
           <div>
-            <input id="class_name" v-model="form.class_name" type="text" maxlength="40" />
+            <input
+              id="class_name"
+              v-model="form.class_name"
+              type="text"
+              maxlength="40"
+              placeholder="Nhập hoặc chọn lớp..."
+              @focus="handleClassInputFocus"
+              @blur="handleClassInputBlur"
+              @input="showSuggestions = true"
+            />
             <p v-if="errors.class_name" class="error">{{ errors.class_name }}</p>
+            <div v-if="showSuggestions && filteredClasses.length > 0" class="class-suggestions">
+              <div
+                v-for="c in filteredClasses"
+                :key="c.code"
+                class="suggestion-item"
+                @click="selectClass(c.code)"
+              >
+                {{ c.code }} - {{ c.name }}
+              </div>
+            </div>
+            <div v-if="showSuggestions && filteredClasses.length === 0 && form.class_name.trim()" class="class-suggestions">
+              <div class="suggestion-item placeholder">Không tìm thấy lớp nào</div>
+            </div>
           </div>
 
           <label for="admission_date">Ngày nhập học</label>
           <input id="admission_date" v-model="form.admission_date" type="date" />
+
+          <label>Ngành học</label>
+          <div class="readonly-field">
+            <span v-if="form.major_name">{{ form.major_code }} - {{ form.major_name }}</span>
+            <span v-else class="placeholder">-- Chọn lớp để tự động điền ngành --</span>
+          </div>
+
+          <label>Khoa/Đơn vị</label>
+          <div class="readonly-field">
+            <span v-if="form.faculty_name">{{ form.faculty_name }}</span>
+            <span v-else class="placeholder">-- Sẽ tự động điền khi chọn lớp --</span>
+          </div>
 
           <label for="status">Trạng thái</label>
           <select id="status" v-model="form.status">
@@ -334,6 +448,8 @@ async function submitForm() {
           <span class="label">Số điện thoại</span><span>{{ form.phone || '-' }}</span>
           <span class="label">Email</span><span>{{ form.email || '-' }}</span>
           <span class="label">Lớp</span><span>{{ form.class_name }}</span>
+          <span class="label">Ngành</span><span>{{ form.major_name || '-' }}</span>
+          <span class="label">Khoa/Đơn vị</span><span>{{ form.faculty_name || '-' }}</span>
           <span class="label">Ngày nhập học</span><span>{{ form.admission_date || '-' }}</span>
           <span class="label">Trạng thái</span><span>{{ form.status }}</span>
         </div>
@@ -491,6 +607,58 @@ label {
   font-weight: 600;
   color: #33435c;
   align-self: center;
+}
+
+.grid > div {
+  position: relative;
+}
+
+.readonly-field {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #c7d3e2;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  background: #f8f9fa;
+  color: #33435c;
+  min-height: 40px;
+}
+
+.placeholder {
+  color: #999;
+  font-style: italic;
+}
+
+.class-suggestions {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: #fff;
+  border: 1px solid #c7d3e2;
+  border-radius: 8px;
+  max-height: 200px;
+  overflow-y: auto;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.suggestion-item {
+  padding: 10px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid #e9eef6;
+  font-size: 14px;
+}
+
+.suggestion-item:hover {
+  background: #f5f8fa;
+}
+
+.suggestion-item:last-child {
+  border-bottom: none;
 }
 
 input,

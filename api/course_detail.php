@@ -15,12 +15,28 @@ require_once __DIR__ . '/app/controllers/CourseController.php';
 $controller = new CourseController();
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-    $controller->detail();
+    $action = strtolower(trim((string)($_GET['action'] ?? '')));
+    if ($action === 'attendance') {
+        $controller->getAttendance();
+    } else {
+        $controller->detail();
+    }
     exit;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $controller->update();
+    $action = strtolower(trim((string)($_GET['action'] ?? '')));
+    if ($action === 'submit-attendance') {
+        $controller->submitAttendance();
+    } elseif ($action === 'create-lesson') {
+        $controller->createLesson();
+    } elseif ($action === 'delete-lesson') {
+        $controller->deleteLesson();
+    } elseif ($action === 'submit-score') {
+        $controller->submitScore();
+    } else {
+        $controller->update();
+    }
     exit;
 }
 

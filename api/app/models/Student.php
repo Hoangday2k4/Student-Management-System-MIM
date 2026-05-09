@@ -30,6 +30,7 @@ class Student
                 SoDienThoai TEXT,
                 Email TEXT UNIQUE,
                 MaLop TEXT,
+                MaNganh TEXT,
                 NgayNhapHoc TEXT,
                 TrangThai TEXT
             )'
@@ -44,15 +45,6 @@ class Student
             )'
         );
         Faculty::ensureSchema($pdo);
-        $pdo->exec(
-            'CREATE TABLE IF NOT EXISTS Nganh (
-                MaNganh TEXT PRIMARY KEY,
-                TenNganh TEXT NOT NULL,
-                MaKhoa TEXT,
-                MoTa TEXT,
-                TrangThai TEXT NOT NULL DEFAULT "Đang đào tạo"
-            )'
-        );
 
         $columns = $pdo->query('PRAGMA table_info(SinhVien)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $names = [];
@@ -61,6 +53,9 @@ class Student
         }
         if (!isset($names['Avatar'])) {
             $pdo->exec('ALTER TABLE SinhVien ADD COLUMN Avatar TEXT');
+        }
+        if (!isset($names['MaNganh'])) {
+            $pdo->exec('ALTER TABLE SinhVien ADD COLUMN MaNganh TEXT');
         }
         if (!isset($names['CreatedAt'])) {
             // SQLite khong cho ADD COLUMN voi DEFAULT CURRENT_TIMESTAMP
@@ -74,25 +69,21 @@ class Student
         return Faculty::resolveIdByName($pdo, $faculty);
     }
 
-    private static function ensureLop(PDO $pdo, string $className, string $faculty): void
+    /**
+     * Verify that class exists in database
+     * @throws RuntimeException if class does not exist
+     */
+    private static function verifyLopExists(PDO $pdo, string $className): void
     {
         $maLop = trim($className);
         if ($maLop === '') {
-            return;
+            throw new RuntimeException('Lớp không được để trống.');
         }
-        $maNganh = self::resolveKhoaIdByName($pdo, $faculty);
-        $stmt = $pdo->prepare(
-            'INSERT INTO LopSinhHoat (MaLop, TenLop, MaNganh, MaGV_CoVan, NienKhoa)
-             VALUES (:ma_lop, :ten_lop, :ma_nganh, NULL, NULL)
-             ON CONFLICT(MaLop) DO UPDATE SET
-                TenLop = excluded.TenLop,
-                MaNganh = COALESCE(excluded.MaNganh, LopSinhHoat.MaNganh)'
-        );
-        $stmt->execute([
-            ':ma_lop' => $maLop,
-            ':ten_lop' => $maLop,
-            ':ma_nganh' => $maNganh,
-        ]);
+        $stmt = $pdo->prepare('SELECT 1 FROM LopSinhHoat WHERE MaLop = :ma_lop LIMIT 1');
+        $stmt->execute([':ma_lop' => $maLop]);
+        if (!$stmt->fetchColumn()) {
+            throw new RuntimeException("Lớp '$maLop' không tồn tại. Vui lòng tạo lớp trước khi thêm sinh viên.");
+        }
     }
 
     public static function create(array $data)
@@ -106,13 +97,14 @@ class Student
     public static function insertWithPdo(PDO $pdo, array $data): int
     {
         self::ensureSchema($pdo);
-        self::ensureLop($pdo, (string)($data['class_name'] ?? ''), (string)($data['faculty'] ?? ''));
+        // Verify class exists before inserting student
+        self::verifyLopExists($pdo, (string)($data['class_name'] ?? ''));
 
         $stmt = $pdo->prepare(
             'INSERT INTO SinhVien (
-                MaSV, HoTen, NgaySinh, GioiTinh, CCCD, DiaChi, SoDienThoai, Email, MaLop, NgayNhapHoc, TrangThai, Avatar, CreatedAt
+                MaSV, HoTen, NgaySinh, GioiTinh, CCCD, DiaChi, SoDienThoai, Email, MaLop, MaNganh, NgayNhapHoc, TrangThai, Avatar, CreatedAt
             ) VALUES (
-                :ma_sv, :ho_ten, :ngay_sinh, :gioi_tinh, :cccd, :dia_chi, :so_dien_thoai, :email, :ma_lop, :ngay_nhap_hoc, :trang_thai, :avatar, CURRENT_TIMESTAMP
+                :ma_sv, :ho_ten, :ngay_sinh, :gioi_tinh, :cccd, :dia_chi, :so_dien_thoai, :email, :ma_lop, :ma_nganh, :ngay_nhap_hoc, :trang_thai, :avatar, CURRENT_TIMESTAMP
             )'
         );
         $stmt->execute([
@@ -125,16 +117,13 @@ class Student
             ':so_dien_thoai' => $data['phone'] ?: null,
             ':email' => $data['email'] ?: null,
             ':ma_lop' => $data['class_name'] ?: null,
+            ':ma_nganh' => trim((string)($data['major'] ?? '')) ?: null,
             ':ngay_nhap_hoc' => trim((string)($data['admission_date'] ?? '')) ?: null,
             ':trang_thai' => $data['status'] ?: 'Đang học',
             ':avatar' => $data['avatar'] ?: null,
         ]);
 
-        // If table uses TEXT primary key, lastInsertId may be 0; retrieve rowid explicitly
-        $stmt2 = $pdo->prepare('SELECT rowid FROM SinhVien WHERE MaSV = :ma_sv LIMIT 1');
-        $stmt2->execute([':ma_sv' => $data['student_code']]);
-        $rid = $stmt2->fetchColumn();
-        return $rid !== false ? (int)$rid : 0;
+        return (int)$pdo->lastInsertId();
     }
 
     private static function mapRow(array $row): array
@@ -148,8 +137,11 @@ class Student
             'cccd' => $row['CCCD'] ?? '',
             'address' => $row['DiaChi'] ?? '',
             'class_name' => $row['MaLop'] ?? '',
+            'major' => $row['MaNganh'] ?? '',
+            'major_code' => $row['MaNganh'] ?? '',
+            'major_name' => $row['TenNganh'] ?? '-',
+            'faculty_name' => $row['TenKhoa'] ?? '-',
             'admission_date' => $row['NgayNhapHoc'] ?? '',
-            'faculty' => $row['TenKhoa'] ?? '',
             'email' => $row['Email'] ?? '',
             'phone' => $row['SoDienThoai'] ?? '',
             'avatar' => $row['Avatar'] ?? '',
@@ -162,75 +154,91 @@ class Student
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $stmt = $pdo->prepare(
-            'SELECT s.*, k.TenKhoa
-             FROM SinhVien s
-             LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
-             LEFT JOIN Nganh n ON n.MaNganh = l.MaNganh
-             LEFT JOIN Khoa k ON k.MaKhoa = COALESCE(n.MaKhoa, l.MaNganh)
-             WHERE s.rowid = :id
-             LIMIT 1'
-        );
+      $stmt = $pdo->prepare(
+        'SELECT 
+            s.*, 
+            n.TenNganh, 
+            k.TenKhoa
+         FROM SinhVien s
+         LEFT JOIN Nganh n ON n.MaNganh = s.MaNganh
+         LEFT JOIN Khoa k ON k.MaKhoa = n.MaKhoa
+         WHERE lower(s.MaSV) = lower(:code)
+         LIMIT 1'
+    );
         $stmt->execute([':id' => $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ? self::mapRow($row) : false;
     }
 
-    public static function search(array $filters = [])
-    {
-        self::ensureSchema();
-        $pdo = get_db_connection();
-        $sql = 'SELECT s.*, k.TenKhoa
-                FROM SinhVien s
-                LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
-                LEFT JOIN Nganh n ON n.MaNganh = l.MaNganh
-                LEFT JOIN Khoa k ON k.MaKhoa = COALESCE(n.MaKhoa, l.MaNganh)
-                WHERE 1=1';
-        $params = [];
+   public static function search(array $filters = [])
+{
+    self::ensureSchema();
+    $pdo = get_db_connection();
 
-        if (!empty($filters['keyword'])) {
-            $sql .= ' AND (
-                lower(s.MaSV) LIKE :keyword
-                OR lower(s.HoTen) LIKE :keyword
-                OR lower(s.MaLop) LIKE :keyword
-                OR lower(IFNULL(k.TenKhoa,"")) LIKE :keyword
-                OR lower(IFNULL(s.Email,"")) LIKE :keyword
-                OR lower(IFNULL(s.SoDienThoai,"")) LIKE :keyword
-            )';
-            $params[':keyword'] = '%' . self::lowerText((string)$filters['keyword']) . '%';
-        }
-        if (!empty($filters['class_name'])) {
-            $sql .= ' AND lower(IFNULL(s.MaLop,"")) LIKE :class_name';
-            $params[':class_name'] = '%' . self::lowerText((string)$filters['class_name']) . '%';
-        }
-        if (!empty($filters['faculty'])) {
-            $sql .= ' AND lower(IFNULL(k.TenKhoa,"")) LIKE :faculty';
-            $params[':faculty'] = '%' . self::lowerText((string)$filters['faculty']) . '%';
-        }
-        if (!empty($filters['status'])) {
-            $sql .= ' AND s.TrangThai = :status';
-            $params[':status'] = $filters['status'];
-        }
-        $sql .= ' ORDER BY lower(IFNULL(k.TenKhoa,"")) ASC, s.MaLop ASC, s.MaSV ASC LIMIT 300';
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        return array_map([self::class, 'mapRow'], $rows);
+    $sql = 'SELECT s.*, 
+                   n.TenNganh, 
+                   k.TenKhoa
+            FROM SinhVien s
+            LEFT JOIN Nganh n ON n.MaNganh = s.MaNganh
+            LEFT JOIN Khoa k ON k.MaKhoa = n.MaKhoa
+            WHERE 1=1';
+    
+    $params = [];
+
+    if (!empty($filters['keyword'])) {
+        $sql .= ' AND (
+            lower(s.MaSV) LIKE :keyword
+            OR lower(s.HoTen) LIKE :keyword
+            OR lower(s.MaLop) LIKE :keyword
+            OR lower(IFNULL(n.TenNganh,"")) LIKE :keyword
+            OR lower(IFNULL(k.TenKhoa,"")) LIKE :keyword
+            OR lower(IFNULL(s.Email,"")) LIKE :keyword
+        )';
+        $params[':keyword'] = '%' . self::lowerText((string)$filters['keyword']) . '%';
     }
+
+    if (!empty($filters['class_name'])) {
+        $sql .= ' AND lower(IFNULL(s.MaLop,"")) LIKE :class_name';
+        $params[':class_name'] = '%' . self::lowerText((string)$filters['class_name']) . '%';
+    }
+
+    if (!empty($filters['faculty'])) {
+        // Tìm kiếm theo tên khoa hoặc tên ngành
+        $sql .= ' AND (lower(IFNULL(k.TenKhoa,"")) LIKE :faculty OR lower(IFNULL(n.TenNganh,"")) LIKE :faculty)';
+        $params[':faculty'] = '%' . self::lowerText((string)$filters['faculty']) . '%';
+    }
+
+    if (!empty($filters['status'])) {
+        $sql .= ' AND s.TrangThai = :status';
+        $params[':status'] = $filters['status'];
+    }
+
+   // Thay bằng dòng này: Sắp xếp theo ngày tạo mới nhất (DESC)
+        $sql .= ' ORDER BY s.CreatedAt DESC, s.MaSV DESC LIMIT 300';
+    
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+    return array_map([self::class, 'mapRow'], $rows);
+}
 
     public static function findByStudentCode(string $studentCode)
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $stmt = $pdo->prepare(
-            'SELECT s.*, k.TenKhoa
-             FROM SinhVien s
-             LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
-             LEFT JOIN Nganh n ON n.MaNganh = l.MaNganh
-             LEFT JOIN Khoa k ON k.MaKhoa = COALESCE(n.MaKhoa, l.MaNganh)
-             WHERE lower(s.MaSV) = lower(:code)
-             LIMIT 1'
-        );
+       $stmt = $pdo->prepare(
+        'SELECT 
+            s.*, 
+            n.TenNganh, 
+            k.TenKhoa
+         FROM SinhVien s
+         LEFT JOIN Nganh n ON n.MaNganh = s.MaNganh
+         LEFT JOIN Khoa k ON k.MaKhoa = n.MaKhoa
+         WHERE lower(s.MaSV) = lower(:code)
+         LIMIT 1'
+);
+    
         $stmt->execute([':code' => $studentCode]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row ? self::mapRow($row) : false;
@@ -240,13 +248,15 @@ class Student
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        self::ensureLop($pdo, (string)($data['class_name'] ?? ''), (string)($data['faculty'] ?? ''));
+        // Verify class exists before updating student
+        self::verifyLopExists($pdo, (string)($data['class_name'] ?? ''));
         $stmt = $pdo->prepare(
             'UPDATE SinhVien
              SET HoTen = :ho_ten,
                  NgaySinh = :ngay_sinh,
                  GioiTinh = :gioi_tinh,
                  MaLop = :ma_lop,
+                 MaNganh = :ma_nganh, -- ĐÃ THÊM DÒNG NÀY ĐỂ LƯU NGÀNH
                  Email = :email,
                  SoDienThoai = :so_dien_thoai,
                  Avatar = :avatar,
@@ -258,6 +268,7 @@ class Student
             ':ngay_sinh' => $data['date_of_birth'] ?: null,
             ':gioi_tinh' => $data['gender'] ?: null,
             ':ma_lop' => $data['class_name'] ?: null,
+            ':ma_nganh' => trim((string)($data['major'] ?? '')) ?: null, // ĐÃ THÊM DÒNG NÀY LẤY TỪ CONTROLLER
             ':email' => $data['email'] ?: null,
             ':so_dien_thoai' => $data['phone'] ?: null,
             ':avatar' => $data['avatar'] ?: null,

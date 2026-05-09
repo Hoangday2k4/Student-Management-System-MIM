@@ -359,7 +359,7 @@ onMounted(async () => {
             <div><b>Ngày sinh:</b> {{ editForm.date_of_birth || '-' }}</div>
             <div><b>Giới tính:</b> {{ genderLabel(editForm.gender) }}</div>
             <div><b>Học hàm/Học vị:</b> {{ editForm.academic_title || '-' }}</div>
-            <div><b>Khoa/Bộ môn:</b> {{ editForm.department || '-' }}</div>
+            <div><b>Khoa:</b> {{ editForm.department || '-' }}</div>
             <div><b>Lớp phụ trách:</b> {{ editForm.homeroom_class || '-' }}</div>
             <div><b>Email:</b> {{ editForm.email || '-' }}</div>
             <div><b>Số điện thoại:</b> {{ editForm.phone || '-' }}</div>
