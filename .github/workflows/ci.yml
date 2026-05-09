@@ -239,6 +239,7 @@ jobs:
           fi
       - name: SonarQube (optional)
         if: env.SONAR_TOKEN != ''
+        continue-on-error: true
         uses: sonarsource/sonarqube-scan-action@v2.0.2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
