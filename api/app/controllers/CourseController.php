@@ -87,7 +87,7 @@ class CourseController
     private function parseScheduleItem(string $item): ?array
     {
         $raw = strtoupper(trim($item));
-        if (!preg_match('/^T([2-7])-\((\d{1,2})-(\d{1,2})\)$/u', $raw, $m)) {
+        if (!preg_match('/^T([2-8])-\((\d{1,2})-(\d{1,2})\)$/u', $raw, $m)) {
             return null;
         }
         $day = (int)$m[1];
@@ -1026,7 +1026,7 @@ class CourseController
         if ($schedule !== '') {
             $scheduleItems = $this->splitMultiValues($schedule);
             foreach ($scheduleItems as $scheduleItem) {
-                if (!preg_match('/^T([2-7])-\((\d{1,2})-(\d{1,2})\)$/u', strtoupper($scheduleItem), $m)) {
+                if (!preg_match('/^T([2-8])-\((\d{1,2})-(\d{1,2})\)$/u', strtoupper($scheduleItem), $m)) {
                     $errors['schedule'] = 'LĂ¡Â»â€¹ch hĂ¡Â»Âc phĂ¡ÂºÂ£i Ă„â€˜Ä‚Âºng dĂ¡ÂºÂ¡ng T2-(1-3), cÄ‚Â³ thĂ¡Â»Æ’ nhiĂ¡Â»Âu giÄ‚Â¡ trĂ¡Â»â€¹ ngĂ„Æ’n cÄ‚Â¡ch bĂ¡Â»Å¸i dĂ¡ÂºÂ¥u phĂ¡ÂºÂ©y.';
                     break;
                 }
@@ -1227,7 +1227,9 @@ class CourseController
         if ($mode === 'subject-update') {
             $originalCode = strtoupper(trim((string)($payload['original_code'] ?? '')));
             if ($originalCode === '') {
-                jsonResponse(['status' => 'error', 'message' => 'Thiáº¿u mĂ£ mĂ´n há»c gá»‘c.'], 422);
+                $originalCode = strtoupper(trim((string)($payload['course_code'] ?? '')));
+            }
+            if ($originalCode === '') {
                 return;
             }
             try {
@@ -1357,6 +1359,21 @@ class CourseController
                 return;
             }
 
+
+            // Check for duplicate course code before inserting
+            $dupCodeRaw = (string)($data['course_code'] ?? '');
+            if ($dupCodeRaw !== '') {
+                $dupStmt = $pdo->prepare('SELECT 1 FROM MonHoc WHERE upper(MaMon) = upper(:code) LIMIT 1');
+                $dupStmt->execute([':code' => $dupCodeRaw]);
+                if ($dupStmt->fetchColumn()) {
+                    jsonResponse([
+                        'status' => 'error',
+                        'message' => 'Ma mon hoc da ton tai.',
+                        'fields' => ['course_code' => 'Ma mon hoc da ton tai.'],
+                    ], 409);
+                    return;
+                }
+            }
             $pdo->beginTransaction();
             $id = Course::insertWithPdo($pdo, $data);
             $pdo->commit();
@@ -1766,6 +1783,43 @@ class CourseController
                     ],
                 ], 422);
                 return;
+            }
+
+            $teacherCode = (string)($data['teacher_code'] ?? '');
+            if ($teacherCode !== '') {
+                $newSlots = $this->buildScheduleSlots((string)($data['schedule'] ?? ''), '');
+                if (!empty($newSlots)) {
+                    $teacherCourses = Course::searchForStaff(['teacher_code' => $teacherCode]);
+                    foreach ($teacherCourses as $row) {
+                        if ((int)($row['id'] ?? 0) === $courseId) {
+                            continue;
+                        }
+                        $existingSlots = $this->buildScheduleSlots((string)($row['schedule'] ?? ''), '');
+                        foreach ($newSlots as $newSlot) {
+                            foreach ($existingSlots as $oldSlot) {
+                                if ((int)$newSlot['day'] !== (int)$oldSlot['day']) {
+                                    continue;
+                                }
+                                if ($this->intervalsOverlap((int)$newSlot['start'], (int)$newSlot['end'], (int)$oldSlot['start'], (int)$oldSlot['end'])) {
+                                    $msg = sprintf(
+                                        'Giang vien %s da co lich day lop %s vao T%s-(%s-%s).',
+                                        $teacherCode,
+                                        (string)($row['course_code'] ?? ''),
+                                        $oldSlot['day'],
+                                        $oldSlot['start'],
+                                        $oldSlot['end']
+                                    );
+                                    jsonResponse([
+                                        'status' => 'error',
+                                        'message' => $msg,
+                                        'fields' => ['teacher_code' => $msg, 'schedule' => $msg],
+                                    ], 409);
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                }
             }
             $pdo->beginTransaction();
 

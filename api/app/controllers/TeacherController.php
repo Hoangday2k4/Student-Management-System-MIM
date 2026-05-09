@@ -232,6 +232,9 @@ class TeacherController
             jsonResponse(['status' => 'error', 'message' => 'Khong the luu giao vien.', 'detail' => $message], 500);
         } catch (Throwable $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            // Debug: write exception message and trace to storage for troubleshooting
+            $debugPath = __DIR__ . '/../../storage/debug_teacher_create.txt';
+            @file_put_contents($debugPath, (string)$e->getMessage() . "\n" . $e->getTraceAsString());
             jsonResponse(['status' => 'error', 'message' => 'Loi he thong.', 'detail' => $e->getMessage()], 500);
         }
     }
@@ -787,7 +790,7 @@ class TeacherController
         }
         $teacher = Teacher::findByTeacherCode($teacherCode);
         if (!$teacher) {
-            jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy giáo viên.'], 404);
+            jsonResponse(['status' => 'error', 'message' => 'Giao vien khong ton tai.'], 404);
             return;
         }
         jsonResponse(['status' => 'success', 'data' => $this->formatTeacherForResponse($teacher)]);
@@ -843,7 +846,7 @@ class TeacherController
             $stmt = $pdo->prepare('SELECT * FROM GiangVien WHERE MaGV = :code LIMIT 1');
             $stmt->execute([':code' => $oldCode]);
             if (!$stmt->fetch()) {
-                jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy giáo viên.'], 404);
+                jsonResponse(['status' => 'error', 'message' => 'Giao vien khong ton tai.'], 404);
                 return;
             }
 

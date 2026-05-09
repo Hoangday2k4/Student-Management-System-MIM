@@ -879,7 +879,7 @@ class StudentController
         }
         $student = Student::findByStudentCode($studentCode);
         if (!$student) {
-            jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y sinh viÄ‚Âªn.'], 404);
+            jsonResponse(['status' => 'error', 'message' => 'Sinh vien khong ton tai.'], 404);
             return;
         }
         jsonResponse(['status' => 'success', 'data' => $this->formatStudentForResponse($student)]);
@@ -938,7 +938,7 @@ class StudentController
             $stmt->execute([':code' => $oldCode]);
             $current = $stmt->fetch();
             if (!$current) {
-                jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y sinh viÄ‚Âªn.'], 404);
+                jsonResponse(['status' => 'error', 'message' => 'Sinh vien khong ton tai.'], 404);
                 return;
             }
 
@@ -1037,7 +1037,7 @@ class StudentController
             $stmt = $pdo->prepare('SELECT 1 FROM SinhVien WHERE MaSV = :code LIMIT 1');
             $stmt->execute([':code' => $studentCode]);
             if (!$stmt->fetch()) {
-                jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y sinh viÄ‚Âªn.'], 404);
+                jsonResponse(['status' => 'error', 'message' => 'Sinh vien khong ton tai.'], 404);
                 return;
             }
 

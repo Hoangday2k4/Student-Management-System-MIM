@@ -121,7 +121,11 @@ class Student
             ':avatar' => $data['avatar'] ?: null,
         ]);
 
-        return (int)$pdo->lastInsertId();
+        // If table uses TEXT primary key, lastInsertId may be 0; retrieve rowid explicitly
+        $stmt2 = $pdo->prepare('SELECT rowid FROM SinhVien WHERE MaSV = :ma_sv LIMIT 1');
+        $stmt2->execute([':ma_sv' => $data['student_code']]);
+        $rid = $stmt2->fetchColumn();
+        return $rid !== false ? (int)$rid : 0;
     }
 
     private static function mapRow(array $row): array
@@ -155,7 +159,7 @@ class Student
              LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
              LEFT JOIN Nganh n ON n.MaNganh = l.MaNganh
              LEFT JOIN Khoa k ON k.MaKhoa = COALESCE(n.MaKhoa, l.MaNganh)
-             WHERE rowid = :id
+             WHERE s.rowid = :id
              LIMIT 1'
         );
         $stmt->execute([':id' => $id]);

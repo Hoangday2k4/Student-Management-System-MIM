@@ -723,10 +723,21 @@ class Course
     {
         self::ensureSchema($pdo);
 
-        $courseCode = strtoupper(trim((string)($data['course_code'] ?? '')));
+        $courseCode = trim((string)($data['course_code'] ?? ''));
         $courseName = trim((string)($data['course_name'] ?? ''));
         $creditsRaw = trim((string)($data['credits'] ?? ''));
         $departmentRaw = trim((string)($data['department'] ?? ''));
+        $providedCourseType = trim((string)($data['course_type'] ?? ''));
+
+        // Validate provided course_type strictly when present
+        if ($providedCourseType !== '') {
+            $upper = function_exists('mb_strtoupper') ? mb_strtoupper($providedCourseType, 'UTF-8') : strtoupper($providedCourseType);
+            $allowed = ['BAT_BUOC', 'TU_CHON', 'TUY_CHON', 'TỰ_CHỌN'];
+            if (!in_array($upper, $allowed, true)) {
+                throw new RuntimeException('Loại môn học không hợp lệ.');
+            }
+        }
+
         $courseType = self::normalizeCourseType((string)($data['course_type'] ?? 'BAT_BUOC'));
 
         if ($courseCode === '') {
@@ -780,7 +791,7 @@ class Course
     public static function deleteSubjectByCodeWithPdo(PDO $pdo, string $courseCode): void
     {
         self::ensureSchema($pdo);
-        $courseCode = strtoupper(trim($courseCode));
+        $courseCode = trim($courseCode);
         if ($courseCode === '') {
             throw new RuntimeException('Thiếu mã môn học.');
         }
@@ -798,10 +809,12 @@ class Course
         }
     }
 
-    public static function findSubjectByCode(string $courseCode)
+    public static function findSubjectByCode(string $courseCode, ?PDO $pdo = null)
     {
-        self::ensureSchema();
-        $pdo = get_db_connection();
+        if (!$pdo) {
+            self::ensureSchema();
+            $pdo = get_db_connection();
+        }
         $courseCode = strtoupper(trim($courseCode));
         if ($courseCode === '') return false;
 
@@ -852,12 +865,12 @@ class Course
             throw new RuntimeException('Thiếu mã môn học gốc.');
         }
 
-        $current = self::findSubjectByCode($originalCode);
+        $current = self::findSubjectByCode($originalCode, $pdo);
         if (!$current) {
             throw new RuntimeException('Không tìm thấy môn học.');
         }
 
-        $newCode = strtoupper(trim((string)($data['course_code'] ?? '')));
+        $newCode = trim((string)($data['course_code'] ?? ''));
         $newName = trim((string)($data['course_name'] ?? ''));
         $creditsRaw = trim((string)($data['credits'] ?? ''));
         $departmentRaw = trim((string)($data['department'] ?? ''));
@@ -912,7 +925,7 @@ class Course
             ]);
         }
 
-        $updated = self::findSubjectByCode($newCode);
+        $updated = self::findSubjectByCode($newCode, $pdo);
         if (!$updated) {
             throw new RuntimeException('Không thể đọc lại dữ liệu môn học sau cập nhật.');
         }

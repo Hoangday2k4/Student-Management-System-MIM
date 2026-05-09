@@ -109,7 +109,7 @@ class Admin
     {
         self::ensureSchema($pdo);
         $stmt = $pdo->prepare(
-            'INSERT INTO TaiKhoan (LoginId, MatKhau, HoTen, LoaiTaiKhoan, TrangThai, Created)
+            'INSERT OR IGNORE INTO TaiKhoan (LoginId, MatKhau, HoTen, LoaiTaiKhoan, TrangThai, Created)
              VALUES (:login_id, :password, :name, :account_type, 1, CURRENT_TIMESTAMP)'
         );
         $stmt->execute([
