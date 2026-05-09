@@ -164,7 +164,7 @@ jobs:
           echo "Checking if server (PID $SERVER_PID) is responding..."
           for i in {1..30}; do
             if ps -p $SERVER_PID > /dev/null 2>&1; then
-              if curl -sSf http://127.0.0.1:8001/ >/dev/null 2>&1; then
+              if curl -sS -o /dev/null http://127.0.0.1:8001/get_config.php 2>/dev/null; then
                 echo "✓ API server ready at http://127.0.0.1:8001"
                 exit 0
               fi
