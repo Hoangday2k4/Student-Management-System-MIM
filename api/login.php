@@ -28,7 +28,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errors['password'] = 'Hay nhap password toi thieu 6 ky tu';
     }
 
-    $skipCaptcha = getenv('CI_TEST_MODE') === '1' || ($CONFIG['RECAPTCHA_SECRET_KEY'] ?? '') === '';
+    $remoteAddr = $_SERVER['REMOTE_ADDR'] ?? '';
+    $isLocalhost = in_array($remoteAddr, ['127.0.0.1', '::1'], true);
+    $skipCaptcha = $isLocalhost
+        || getenv('CI_TEST_MODE') === '1'
+        || ($CONFIG['RECAPTCHA_SECRET_KEY'] ?? '') === '';
     if (!$skipCaptcha) {
         if (empty($recaptcha_response)) {
             $errors['login'] = 'Vui long xac nhan ban khong phai robot';
