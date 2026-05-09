@@ -1,3 +1,9 @@
 api/config_env.php
 api/storage/*.sqlite
 api/vendor/
+api/.phpunit.result.cache
+tests/postman/node_modules/
+tests/postman/package-lock.json
+tests/postman/reports/junit.xml
+tests/postman/reports/report.html
+.claude/settings.local.json
