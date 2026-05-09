@@ -44,6 +44,15 @@ class Student
             )'
         );
         Faculty::ensureSchema($pdo);
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS Nganh (
+                MaNganh TEXT PRIMARY KEY,
+                TenNganh TEXT NOT NULL,
+                MaKhoa TEXT,
+                MoTa TEXT,
+                TrangThai TEXT NOT NULL DEFAULT "Đang đào tạo"
+            )'
+        );
 
         $columns = $pdo->query('PRAGMA table_info(SinhVien)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $names = [];
