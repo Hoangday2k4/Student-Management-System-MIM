@@ -139,7 +139,7 @@ class TeacherController
 
     public function create()
     {
-        // $identity = $this->currentIdentity();
+        $identity = $this->currentIdentity();
         if (!$identity) {
             jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
             return;
@@ -165,7 +165,6 @@ class TeacherController
         $errors = [];
         if ($teacherCode === '') $errors['teacher_code'] = 'Hay nhap ma giao vien.';
         if ($fullName === '') $errors['full_name'] = 'Hay nhap ho ten.';
-        if ($department === '') $errors['department'] = 'Hay nhap khoa/bo mon.';
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Email khong hop le.';
         if ($gender === '') $errors['gender'] = 'Gioi tinh khong hop le.';
         if ($status === '') $errors['status'] = 'Trang thai khong hop le.';

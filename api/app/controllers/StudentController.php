@@ -177,7 +177,6 @@ class StudentController
         if ($studentCode === '') $errors['student_code'] = 'Hay nhap ma so sinh vien.';
         if ($fullName === '') $errors['full_name'] = 'Hay nhap ho ten.';
         if ($className === '') $errors['class_name'] = 'Hay nhap lop.';
-        if ($major === '') $errors['major'] = 'Hay chon nganh.';
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Email khong hop le.';
         if ($gender === '') $errors['gender'] = 'Gioi tinh khong hop le.';
         if ($status === '') $errors['status'] = 'Trang thai khong hop le.';

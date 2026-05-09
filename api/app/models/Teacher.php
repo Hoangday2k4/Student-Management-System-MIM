@@ -115,7 +115,7 @@ class Teacher
             'SELECT g.*, k.TenKhoa
              FROM GiangVien g
              LEFT JOIN Khoa k ON k.MaKhoa = g.MaNganh
-             WHERE rowid = :id
+             WHERE g.rowid = :id
              LIMIT 1'
         );
         $stmt->execute([':id' => $id]);

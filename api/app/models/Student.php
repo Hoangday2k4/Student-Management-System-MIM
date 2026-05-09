@@ -45,6 +45,15 @@ class Student
             )'
         );
         Faculty::ensureSchema($pdo);
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS Nganh (
+                MaNganh TEXT PRIMARY KEY,
+                TenNganh TEXT NOT NULL,
+                MaKhoa TEXT,
+                MoTa TEXT,
+                TrangThai TEXT NOT NULL DEFAULT "Đang đào tạo"
+            )'
+        );
 
         $columns = $pdo->query('PRAGMA table_info(SinhVien)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $names = [];
@@ -69,21 +78,25 @@ class Student
         return Faculty::resolveIdByName($pdo, $faculty);
     }
 
-    /**
-     * Verify that class exists in database
-     * @throws RuntimeException if class does not exist
-     */
-    private static function verifyLopExists(PDO $pdo, string $className): void
+    private static function ensureLop(PDO $pdo, string $className, string $faculty): void
     {
         $maLop = trim($className);
         if ($maLop === '') {
-            throw new RuntimeException('Lớp không được để trống.');
+            return;
         }
-        $stmt = $pdo->prepare('SELECT 1 FROM LopSinhHoat WHERE MaLop = :ma_lop LIMIT 1');
-        $stmt->execute([':ma_lop' => $maLop]);
-        if (!$stmt->fetchColumn()) {
-            throw new RuntimeException("Lớp '$maLop' không tồn tại. Vui lòng tạo lớp trước khi thêm sinh viên.");
-        }
+        $maNganh = self::resolveKhoaIdByName($pdo, $faculty);
+        $stmt = $pdo->prepare(
+            'INSERT INTO LopSinhHoat (MaLop, TenLop, MaNganh, MaGV_CoVan, NienKhoa)
+             VALUES (:ma_lop, :ten_lop, :ma_nganh, NULL, NULL)
+             ON CONFLICT(MaLop) DO UPDATE SET
+                TenLop = excluded.TenLop,
+                MaNganh = COALESCE(excluded.MaNganh, LopSinhHoat.MaNganh)'
+        );
+        $stmt->execute([
+            ':ma_lop' => $maLop,
+            ':ten_lop' => $maLop,
+            ':ma_nganh' => $maNganh,
+        ]);
     }
 
     public static function create(array $data)
@@ -97,8 +110,7 @@ class Student
     public static function insertWithPdo(PDO $pdo, array $data): int
     {
         self::ensureSchema($pdo);
-        // Verify class exists before inserting student
-        self::verifyLopExists($pdo, (string)($data['class_name'] ?? ''));
+        self::ensureLop($pdo, (string)($data['class_name'] ?? ''), (string)($data['faculty'] ?? ''));
 
         $stmt = $pdo->prepare(
             'INSERT INTO SinhVien (
@@ -123,7 +135,11 @@ class Student
             ':avatar' => $data['avatar'] ?: null,
         ]);
 
-        return (int)$pdo->lastInsertId();
+        // For TEXT primary keys, lastInsertId may return 0 — retrieve rowid explicitly
+        $stmt2 = $pdo->prepare('SELECT rowid FROM SinhVien WHERE MaSV = :ma_sv LIMIT 1');
+        $stmt2->execute([':ma_sv' => $data['student_code']]);
+        $rid = $stmt2->fetchColumn();
+        return $rid !== false ? (int)$rid : 0;
     }
 
     private static function mapRow(array $row): array
