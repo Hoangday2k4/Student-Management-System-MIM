@@ -27,6 +27,7 @@ $accountType = $identity['account_type'] ?? 'student';
 $displayName = trim((string)($identity['name'] ?? ''));
 
 echo json_encode([
+    'status' => 'success',
     'login_id' => $loginId,
     'login_time' => $loginTime,
     'account_type' => $accountType,

@@ -14,8 +14,7 @@ const bulkSkippedInFile = ref([])
 const bulkResult = ref({ inserted_count: 0, skipped_count: 0, skipped: [] })
 const bulkFileName = ref('')
 
-const majors = ref([])
-const loadingMajors = ref(false)
+
 const classes = ref([])
 const loadingClasses = ref(false)
 const showSuggestions = ref(false)

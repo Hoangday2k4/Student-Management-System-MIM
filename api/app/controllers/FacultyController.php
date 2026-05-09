@@ -98,6 +98,10 @@ class FacultyController
             jsonResponse(['status' => 'error', 'message' => 'Thiếu mã khoa cần cập nhật.'], 422);
             return;
         }
+        if ($action === 'create' && $code === '') {
+            jsonResponse(['status' => 'error', 'message' => 'Hãy nhập mã khoa.'], 422);
+            return;
+        }
         if ($name === '') {
             jsonResponse(['status' => 'error', 'message' => 'Tên khoa không được để trống.'], 422);
             return;
@@ -110,6 +114,15 @@ class FacultyController
         if (!$this->teacherExists($pdo, $headTeacherCode)) {
             jsonResponse(['status' => 'error', 'message' => 'Mã giảng viên trưởng khoa không tồn tại.'], 422);
             return;
+        }
+
+        if ($action === 'create' && $code !== '') {
+            $dup = $pdo->prepare('SELECT 1 FROM Khoa WHERE lower(MaKhoa) = lower(:code) LIMIT 1');
+            $dup->execute([':code' => $code]);
+            if ($dup->fetchColumn()) {
+                jsonResponse(['status' => 'error', 'message' => 'Mã khoa đã tồn tại.'], 409);
+                return;
+            }
         }
 
         try {
@@ -167,6 +180,11 @@ class FacultyController
         $pdo->exec('PRAGMA busy_timeout = 5000');
         Faculty::ensureSchema($pdo);
 
+        if (!Faculty::findByCode($code, $pdo)) {
+            jsonResponse(['status' => 'error', 'message' => 'Khoa khong ton tai.'], 404);
+            return;
+        }
+
         try {
             $pdo->beginTransaction();
             Faculty::deleteByCodeWithPdo($pdo, $code);
@@ -176,7 +194,7 @@ class FacultyController
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 409);
         } catch (PDOException $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

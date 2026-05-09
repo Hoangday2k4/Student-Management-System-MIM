@@ -104,6 +104,15 @@ class MajorController
         $pdo->exec('PRAGMA busy_timeout = 5000');
         Major::ensureSchema($pdo);
 
+        if ($action === 'create' && $code !== '') {
+            $dup = $pdo->prepare('SELECT 1 FROM Nganh WHERE lower(MaNganh) = lower(:code) LIMIT 1');
+            $dup->execute([':code' => $code]);
+            if ($dup->fetchColumn()) {
+                jsonResponse(['status' => 'error', 'message' => 'Mã ngành đã tồn tại.'], 409);
+                return;
+            }
+        }
+
         try {
             $pdo->beginTransaction();
             if ($action === 'update') {
@@ -159,6 +168,11 @@ class MajorController
         $pdo->exec('PRAGMA busy_timeout = 5000');
         Major::ensureSchema($pdo);
 
+        if (!Major::findByCode($code, $pdo)) {
+            jsonResponse(['status' => 'error', 'message' => 'Nganh khong ton tai.'], 404);
+            return;
+        }
+
         try {
             $pdo->beginTransaction();
             Major::deleteByCodeWithPdo($pdo, $code);
@@ -168,7 +182,7 @@ class MajorController
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 409);
         } catch (PDOException $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

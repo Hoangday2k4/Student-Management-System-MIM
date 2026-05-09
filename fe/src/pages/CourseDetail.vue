@@ -33,25 +33,7 @@ const scoreForm = ref({
 const isStaff = computed(() => accountType.value === 'staff')
 const isTeacher = computed(() => accountType.value === 'teacher')
 
-const totalWeight = computed(() => {
-  const wcc = parseFloat(scoreForm.value.weight_cc) || 0
-  const wgk = parseFloat(scoreForm.value.weight_gk) || 0
-  const wck = parseFloat(scoreForm.value.weight_ck) || 0
-  return wcc + wgk + wck
-})
 
-const previewTotal = computed(() => {
-  const cc = parseFloat(scoreForm.value.cc) || 0
-  const gk = parseFloat(scoreForm.value.gk) || 0
-  const ck = parseFloat(scoreForm.value.ck) || 0
-  const sum = totalWeight.value
-  
-  if (sum === 0) return '-'
-  const total = (cc * (scoreForm.value.weight_cc || 0) + 
-                 gk * (scoreForm.value.weight_gk || 0) + 
-                 ck * (scoreForm.value.weight_ck || 0)) / sum
-  return Math.round(total * 100) / 100
-})
 
 function splitItems(value) {
   return String(value || '')

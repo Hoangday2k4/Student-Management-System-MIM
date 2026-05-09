@@ -116,7 +116,7 @@ function validateForm() {
     ok = false
   }
   if (!asText(form.teacher_code)) {
-    errors.teacher_code = 'HĂ£y chá»n mĂ£ giĂ¡o viĂªn.'
+    errors.teacher_code = 'Hãy chọn mã giáo viên.'
     ok = false
   }
   if (asText(form.section_code) && !/^[A-Za-z0-9._-]{3,30}$/.test(asText(form.section_code))) {

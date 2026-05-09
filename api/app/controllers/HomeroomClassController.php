@@ -104,6 +104,15 @@ class HomeroomClassController
         $pdo->exec('PRAGMA busy_timeout = 5000');
         HomeroomClass::ensureSchema($pdo);
 
+        if ($action === 'create' && $code !== '') {
+            $dup = $pdo->prepare('SELECT 1 FROM LopSinhHoat WHERE lower(MaLop) = lower(:code) LIMIT 1');
+            $dup->execute([':code' => $code]);
+            if ($dup->fetchColumn()) {
+                jsonResponse(['status' => 'error', 'message' => 'Mã lớp đã tồn tại.'], 409);
+                return;
+            }
+        }
+
         try {
             $pdo->beginTransaction();
             if ($action === 'update') {
@@ -129,7 +138,7 @@ class HomeroomClassController
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 422);
         } catch (PDOException $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -159,6 +168,13 @@ class HomeroomClassController
         $pdo->exec('PRAGMA busy_timeout = 5000');
         HomeroomClass::ensureSchema($pdo);
 
+        $existing = $pdo->prepare('SELECT 1 FROM LopSinhHoat WHERE lower(MaLop) = lower(:code) LIMIT 1');
+        $existing->execute([':code' => $code]);
+        if (!$existing->fetchColumn()) {
+            jsonResponse(['status' => 'error', 'message' => 'Lop khong ton tai.'], 404);
+            return;
+        }
+
         try {
             $pdo->beginTransaction();
             HomeroomClass::deleteByCodeWithPdo($pdo, $code);
@@ -168,7 +184,7 @@ class HomeroomClassController
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
             }
-            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 409);
         } catch (PDOException $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();

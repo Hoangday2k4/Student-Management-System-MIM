@@ -147,6 +147,32 @@ class CourseController
         return $slots;
     }
 
+    private function findTeacherConflict(PDO $pdo, string $scheduleRaw, string $teacherCode, ?int $excludeCourseId = null): ?array
+    {
+        if ($teacherCode === '' || $scheduleRaw === '') return null;
+        $newSlots = $this->buildScheduleSlots($scheduleRaw, '');
+        if (empty($newSlots)) return null;
+
+        $rows = Course::searchForStaff(['teacher_code' => $teacherCode]);
+        if ($excludeCourseId !== null && $excludeCourseId > 0) {
+            $rows = array_values(array_filter($rows, static function ($row) use ($excludeCourseId) {
+                return (int)($row['id'] ?? 0) !== $excludeCourseId;
+            }));
+        }
+        foreach ($rows as $row) {
+            $existingSlots = $this->buildScheduleSlots((string)($row['schedule'] ?? ''), '');
+            foreach ($newSlots as $newSlot) {
+                foreach ($existingSlots as $oldSlot) {
+                    if ((int)$newSlot['day'] !== (int)$oldSlot['day']) continue;
+                    if ($this->intervalsOverlap((int)$newSlot['start'], (int)$newSlot['end'], (int)$oldSlot['start'], (int)$oldSlot['end'])) {
+                        return ['course_code' => (string)($row['course_code'] ?? ''), 'day' => (int)$newSlot['day'], 'start' => (int)$newSlot['start'], 'end' => (int)$newSlot['end']];
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     private function findClassroomConflict(PDO $pdo, string $scheduleRaw, string $classroomRaw, ?int $excludeCourseId = null): ?array
     {
         $newSlots = $this->buildScheduleSlots($scheduleRaw, $classroomRaw);
@@ -1039,7 +1065,7 @@ class CourseController
         if ($schedule !== '') {
             $scheduleItems = $this->splitMultiValues($schedule);
             foreach ($scheduleItems as $scheduleItem) {
-                if (!preg_match('/^T([2-7])-\((\d{1,2})-(\d{1,2})\)$/u', strtoupper($scheduleItem), $m)) {
+                if (!preg_match('/^T([2-8])-\((\d{1,2})-(\d{1,2})\)$/u', strtoupper($scheduleItem), $m)) {
                     $errors['schedule'] = 'LĂ¡Â»â€¹ch hĂ¡Â»Âc phĂ¡ÂºÂ£i Ă„â€˜Ä‚Âºng dĂ¡ÂºÂ¡ng T2-(1-3), cÄ‚Â³ thĂ¡Â»Æ’ nhiĂ¡Â»Âu giÄ‚Â¡ trĂ¡Â»â€¹ ngĂ„Æ’n cÄ‚Â¡ch bĂ¡Â»Å¸i dĂ¡ÂºÂ¥u phĂ¡ÂºÂ©y.';
                     break;
                 }
@@ -1238,7 +1264,7 @@ class CourseController
 
         $mode = strtolower(trim((string)($_GET['mode'] ?? ($payload['mode'] ?? ''))));
         if ($mode === 'subject-update') {
-            $originalCode = strtoupper(trim((string)($payload['original_code'] ?? '')));
+            $originalCode = strtoupper(trim((string)($payload['original_code'] ?? $payload['course_code'] ?? '')));
             if ($originalCode === '') {
                 jsonResponse(['status' => 'error', 'message' => 'Thiáº¿u mĂ£ mĂ´n há»c gá»‘c.'], 422);
                 return;
@@ -1347,6 +1373,17 @@ class CourseController
             if (!empty($errors)) {
                 jsonResponse(['status' => 'error', 'message' => 'DĂ¡Â»Â¯ liĂ¡Â»â€¡u khÄ‚Â´ng hĂ¡Â»Â£p lĂ¡Â»â€¡.', 'fields' => $errors], 422);
                 return;
+            }
+
+            // Check for duplicate course code
+            $courseCodeCheck = strtoupper(trim((string)($data['course_code'] ?? '')));
+            if ($courseCodeCheck !== '') {
+                $dupStmt = $pdo->prepare('SELECT 1 FROM MonHoc WHERE upper(MaMon) = :ma_mon LIMIT 1');
+                $dupStmt->execute([':ma_mon' => $courseCodeCheck]);
+                if ($dupStmt->fetchColumn()) {
+                    jsonResponse(['status' => 'error', 'message' => 'Mã môn học đã tồn tại.', 'fields' => ['course_code' => 'Mã môn học đã tồn tại.']], 409);
+                    return;
+                }
             }
 
             $roomConflict = $this->findClassroomConflict($pdo, (string)($data['schedule'] ?? ''), (string)($data['classroom'] ?? ''), null);
@@ -1811,6 +1848,14 @@ class CourseController
                         'classroom' => $msg,
                     ],
                 ], 422);
+                return;
+            }
+
+                        $teacherConflict2 = $this->findTeacherConflict($pdo, (string)($data['schedule'] ?? ''), (string)($data['teacher_code'] ?? ''), $courseId);
+            if ($teacherConflict2) {
+                $msg = sprintf('Giảng viên đã có lịch dạy lớp %s vào T%s-(%s-%s).',
+                    $teacherConflict2['course_code'], $teacherConflict2['day'], $teacherConflict2['start'], $teacherConflict2['end']);
+                jsonResponse(['status' => 'error', 'message' => $msg, 'fields' => ['schedule' => $msg]], 422);
                 return;
             }
 

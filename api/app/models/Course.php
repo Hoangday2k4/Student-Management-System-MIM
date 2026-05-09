@@ -836,7 +836,7 @@ class Course
     {
         self::ensureSchema($pdo);
 
-        $courseCode = strtoupper(trim((string)($data['course_code'] ?? '')));
+        $courseCode = trim((string)($data['course_code'] ?? ''));
         $courseName = trim((string)($data['course_name'] ?? ''));
         $creditsRaw = trim((string)($data['credits'] ?? ''));
         $departmentRaw = trim((string)($data['department'] ?? ''));
@@ -850,6 +850,15 @@ class Course
         }
         if ($creditsRaw === '' || !preg_match('/^\d+$/', $creditsRaw) || (int)$creditsRaw <= 0) {
             throw new RuntimeException('Số tín chỉ phải là số nguyên dương.');
+        }
+
+        $providedCourseType = trim((string)($data['course_type'] ?? ''));
+        if ($providedCourseType !== '') {
+            $upper = strtoupper($providedCourseType);
+            $allowed = ['BAT_BUOC', 'TU_CHON', 'TUY_CHON'];
+            if (!in_array($upper, $allowed, true)) {
+                throw new RuntimeException('Loại môn học không hợp lệ.');
+            }
         }
 
         $departmentCode = self::resolveNganhCode($pdo, $departmentRaw);
@@ -959,7 +968,7 @@ class Course
 
     public static function updateSubjectByCodeWithPdo(PDO $pdo, string $originalCode, array $data): array
     {
-        self::ensureSchema($pdo);
+        // Caller is responsible for calling ensureSchema before starting a transaction
         $originalCode = strtoupper(trim($originalCode));
         if ($originalCode === '') {
             throw new RuntimeException('Thiếu mã môn học gốc.');

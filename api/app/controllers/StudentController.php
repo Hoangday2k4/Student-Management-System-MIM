@@ -930,7 +930,7 @@ class StudentController
         }
         $student = Student::findByStudentCode($studentCode);
         if (!$student) {
-            jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y sinh viÄ‚Âªn.'], 404);
+            jsonResponse(['status' => 'error', 'message' => 'Sinh vien khong ton tai.'], 404);
             return;
         }
         jsonResponse(['status' => 'success', 'data' => $this->formatStudentForResponse($student)]);
