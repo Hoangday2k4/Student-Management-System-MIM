@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -25,8 +25,19 @@ const scoreForm = ref({
   cc: '',
   gk: '',
   ck: '',
-  weight_cc: 0.1,
-  weight_gk: 0.3,
+})
+const savingWeights = ref(false)
+
+// Weight management states
+const showWeightModal = ref(false)
+const classWeights = ref({
+  weight_cc: 0.2,
+  weight_gk: 0.2,
+  weight_ck: 0.6
+})
+const weightForm = ref({
+  weight_cc: 0.2,
+  weight_gk: 0.2,
   weight_ck: 0.6
 })
 
@@ -282,12 +293,18 @@ function openScoreModal(student) {
   scoreForm.value = {
     cc: student.cc ?? '',
     gk: student.gk ?? '',
-    ck: student.ck ?? '',
-    weight_cc: 0.1,
-    weight_gk: 0.3,
-    weight_ck: 0.6
+    ck: student.ck ?? ''
   }
   showScoreModal.value = true
+}
+
+function openWeightModal() {
+  weightForm.value = {
+    weight_cc: classWeights.value.weight_cc,
+    weight_gk: classWeights.value.weight_gk,
+    weight_ck: classWeights.value.weight_ck
+  }
+  showWeightModal.value = true
 }
 
 async function saveScore() {
@@ -297,16 +314,9 @@ async function saveScore() {
     const cc = parseFloat(scoreForm.value.cc) || 0
     const gk = parseFloat(scoreForm.value.gk) || 0
     const ck = parseFloat(scoreForm.value.ck) || 0
-    const weight_cc = parseFloat(scoreForm.value.weight_cc) || 0.1
-    const weight_gk = parseFloat(scoreForm.value.weight_gk) || 0.3
-    const weight_ck = parseFloat(scoreForm.value.weight_ck) || 0.6
-
-    // Validate weights sum to 1
-    const totalWeight = weight_cc + weight_gk + weight_ck
-    if (Math.abs(totalWeight - 1) > 0.01) {
-      errorMessage.value = 'Tổng trọng số phải bằng 1.0'
-      return
-    }
+    const weight_cc = classWeights.value.weight_cc
+    const weight_gk = classWeights.value.weight_gk
+    const weight_ck = classWeights.value.weight_ck
 
     const res = await fetch('/api/courses/detail?action=submit-score', {
       method: 'POST',
@@ -348,6 +358,62 @@ async function saveScore() {
     alert(payload.message || 'Lưu điểm thành công!')
   } catch (error) {
     errorMessage.value = 'Không kết nối được máy chủ.'
+  }
+}
+
+async function saveWeights() {
+  if (!course.value?.section_code) {
+    errorMessage.value = 'Thiếu mã lớp học phần'
+    return
+  }
+
+  try {
+    const weight_cc = parseFloat(weightForm.value.weight_cc) || 0.1
+    const weight_gk = parseFloat(weightForm.value.weight_gk) || 0.3
+    const weight_ck = parseFloat(weightForm.value.weight_ck) || 0.6
+
+    // Validate weights sum to 1
+    const totalWeight = weight_cc + weight_gk + weight_ck
+    if (Math.abs(totalWeight - 1) > 0.01) {
+      errorMessage.value = 'Tổng trọng số phải bằng 1.0'
+      return
+    }
+
+    // Update class weights
+    classWeights.value.weight_cc = weight_cc
+    classWeights.value.weight_gk = weight_gk
+    classWeights.value.weight_ck = weight_ck
+
+    // Recalculate total scores for all students
+    const requestBody = {
+      section_code: String(course.value.section_code).trim(),
+      weight_cc: weight_cc,
+      weight_gk: weight_gk,
+      weight_ck: weight_ck
+    }
+
+    const res = await fetch('/api/courses/detail?action=update-weights', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(requestBody)
+    })
+
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok || payload.status !== 'success') {
+      errorMessage.value = payload.message || 'Không thể cập nhật trọng số.'
+      return
+    }
+
+    // Update students with new total scores if provided
+    if (Array.isArray(payload.students)) {
+      students.value = payload.students
+    }
+
+    errorMessage.value = ''
+    showWeightModal.value = false
+    alert(payload.message || 'Cập nhật trọng số thành công!')
+  } catch (error) {
+    errorMessage.value = 'Không kết nối được máy chủ: ' + error.message
   }
 }
 </script>
@@ -425,7 +491,12 @@ async function saveScore() {
           </div>
         </div>
 
-        <h2>Danh sách sinh viên</h2>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+          <h2 style="margin: 0;">Danh sách sinh viên</h2>
+          <button v-if="isTeacher || isStaff" class="btn-primary" @click="openWeightModal" style="margin: 0;">
+            Trọng số
+          </button>
+        </div>
         <div v-if="students.length === 0" class="state">Chưa có sinh viên trong lớp học này.</div>
         <div v-else class="table-scroll">
           <table class="result-table">
@@ -577,21 +648,11 @@ async function saveScore() {
                   <input v-model.number="scoreForm.cc" type="number" min="0" max="10" step="0.5" placeholder="0-10">
                 </div>
 
-                <div class="form-group">
-                  <label>Trọng số CC</label>
-                  <input v-model.number="scoreForm.weight_cc" type="number" min="0" max="1" step="0.05" placeholder="0.1">
-                </div>
-
                 <hr class="form-divider">
 
                 <div class="form-group">
                   <label>Điểm giữa kỳ (GK)</label>
                   <input v-model.number="scoreForm.gk" type="number" min="0" max="10" step="0.5" placeholder="0-10">
-                </div>
-
-                <div class="form-group">
-                  <label>Trọng số GK</label>
-                  <input v-model.number="scoreForm.weight_gk" type="number" min="0" max="1" step="0.05" placeholder="0.3">
                 </div>
 
                 <hr class="form-divider">
@@ -600,24 +661,50 @@ async function saveScore() {
                   <label>Điểm cuối kỳ (CK)</label>
                   <input v-model.number="scoreForm.ck" type="number" min="0" max="10" step="0.5" placeholder="0-10">
                 </div>
-
-                <div class="form-group">
-                  <label>Trọng số CK</label>
-                  <input v-model.number="scoreForm.weight_ck" type="number" min="0" max="1" step="0.05" placeholder="0.6">
-                </div>
-
-                
-              
-
-                <hr class="form-divider">
-
-               
               </div>
             </div>
 
             <div class="modal-footer">
               <button class="btn-primary" @click="saveScore">Lưu điểm</button>
               <button class="btn-ghost" @click="showScoreModal = false">Hủy</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal Cập nhật trọng số -->
+        <div v-if="showWeightModal" class="modal-overlay" @click.self="showWeightModal = false">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h3>Cập nhật trọng số tính điểm tổng kết</h3>
+              <button class="modal-close" @click="showWeightModal = false">✕</button>
+            </div>
+
+            <div class="modal-body">
+              <div class="score-form">
+                <div class="weight-info">
+                  Tổng trọng số phải bằng 1.0
+                </div>
+
+                <div class="form-group">
+                  <label>Trọng số CC</label>
+                  <input v-model.number="weightForm.weight_cc" type="number" min="0" max="1" step="0.05" placeholder="0.1">
+                </div>
+
+                <div class="form-group">
+                  <label>Trọng số GK</label>
+                  <input v-model.number="weightForm.weight_gk" type="number" min="0" max="1" step="0.05" placeholder="0.3">
+                </div>
+
+                <div class="form-group">
+                  <label>Trọng số CK</label>
+                  <input v-model.number="weightForm.weight_ck" type="number" min="0" max="1" step="0.05" placeholder="0.6">
+                </div>
+              </div>
+            </div>
+
+            <div class="modal-footer">
+              <button class="btn-primary" @click="saveWeights">Cập nhật</button>
+              <button class="btn-ghost" @click="showWeightModal = false">Hủy</button>
             </div>
           </div>
         </div>
