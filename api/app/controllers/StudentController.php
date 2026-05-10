@@ -302,7 +302,7 @@ class StudentController
         foreach ($lines as $line) {
             if (trim($line) === '') continue;
             
-            $row = str_getcsv($line, $delimiter);
+            $row = str_getcsv($line, $delimiter, '"', '');
             $row = array_map('trim', $row);
             $rows[] = $row;
         }

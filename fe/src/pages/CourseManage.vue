@@ -14,6 +14,86 @@ const deletingCode = ref('')
 const detailVisible = ref(false)
 const detailLoading = ref(false)
 const detailError = ref('')
+
+// Import state
+const fileInputRef = ref(null)
+const importStep = ref('idle') // idle | preview | done
+const importSaving = ref(false)
+const importMessage = ref('')
+const importFileName = ref('')
+const importRows = ref([])
+const importSkipped = ref([])
+const importResult = ref({ inserted_count: 0, skipped_count: 0, skipped: [] })
+
+function triggerImport() {
+  importMessage.value = ''
+  if (fileInputRef.value) {
+    fileInputRef.value.value = ''
+    fileInputRef.value.click()
+  }
+}
+
+async function handleImportFile(event) {
+  const file = event?.target?.files?.[0]
+  if (!file) return
+  importMessage.value = ''
+  importSaving.value = true
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch('/api/courses/import?action=preview&mode=subject', { method: 'POST', body: formData })
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok || payload.status === 'error') {
+      importMessage.value = payload.detail ? `${payload.message} (${payload.detail})` : (payload.message || 'Không thể đọc file.')
+      return
+    }
+    importRows.value = Array.isArray(payload.rows) ? payload.rows : []
+    importSkipped.value = Array.isArray(payload.skipped_in_file) ? payload.skipped_in_file : []
+    importFileName.value = file.name || ''
+    importStep.value = 'preview'
+  } catch {
+    importMessage.value = 'Không kết nối được máy chủ.'
+  } finally {
+    importSaving.value = false
+  }
+}
+
+async function submitImport() {
+  if (!importRows.value.length) return
+  importSaving.value = true
+  importMessage.value = ''
+  try {
+    const res = await fetch('/api/courses/import?mode=subject', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: importRows.value }),
+    })
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok || payload.status === 'error') {
+      importMessage.value = payload.message || 'Không thể lưu môn học.'
+      return
+    }
+    importResult.value = {
+      inserted_count: Number(payload.inserted_count || 0),
+      skipped_count: Number(payload.skipped_count || 0),
+      skipped: Array.isArray(payload.skipped) ? payload.skipped : [],
+    }
+    importStep.value = 'done'
+    await doSearch()
+  } catch {
+    importMessage.value = 'Không kết nối được máy chủ.'
+  } finally {
+    importSaving.value = false
+  }
+}
+
+function closeImport() {
+  importStep.value = 'idle'
+  importRows.value = []
+  importSkipped.value = []
+  importMessage.value = ''
+}
+
 const detail = reactive({
   course_code: '',
   course_name: '',
@@ -173,7 +253,13 @@ onMounted(async () => {
           <h1>Quản lý môn học</h1>
           <p class="subtitle">Quản lý danh sách môn học.</p>
         </div>
-        <button class="btn-add" type="button" @click="goCreate">+ Thêm môn học</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn-add" type="button" @click="goCreate">+ Thêm môn học</button>
+          <button class="btn-import" type="button" :disabled="importSaving" @click="triggerImport">
+            {{ importSaving ? 'Đang đọc...' : 'Import file' }}
+          </button>
+          <input ref="fileInputRef" type="file" accept=".csv,.xlsx" style="display:none" @change="handleImportFile" />
+        </div>
       </div>
 
       <div class="stats-grid">
@@ -253,6 +339,48 @@ onMounted(async () => {
               </tr>
             </tbody>
           </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Import preview modal -->
+    <div v-if="importStep === 'preview'" class="modal-backdrop" @click.self="closeImport">
+      <div class="modal-card">
+        <h2>Xác nhận import môn học</h2>
+        <p><b>File:</b> {{ importFileName }}</p>
+        <p><b>Số dòng hợp lệ:</b> {{ importRows.length }} &nbsp;|&nbsp; <b>Bỏ qua:</b> {{ importSkipped.length }}</p>
+        <div class="preview-table-wrap">
+          <table class="preview-table">
+            <thead><tr><th>Mã môn</th><th>Tên môn</th><th>Tín chỉ</th><th>Loại</th><th>Mã ngành</th></tr></thead>
+            <tbody>
+              <tr v-for="row in importRows" :key="row.course_code">
+                <td>{{ row.course_code }}</td>
+                <td>{{ row.course_name }}</td>
+                <td>{{ row.credits }}</td>
+                <td>{{ row.course_type }}</td>
+                <td>{{ row.department }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p v-if="importMessage" class="error">{{ importMessage }}</p>
+        <div class="modal-actions">
+          <button class="btn-add" :disabled="importSaving || !importRows.length" @click="submitImport">
+            {{ importSaving ? 'Đang lưu...' : 'Lưu danh sách' }}
+          </button>
+          <button class="btn-ghost" @click="closeImport">Hủy</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Import done modal -->
+    <div v-if="importStep === 'done'" class="modal-backdrop" @click.self="closeImport">
+      <div class="modal-card">
+        <h2>Import hoàn tất</h2>
+        <p>Đã thêm <b>{{ importResult.inserted_count }}</b> môn học.</p>
+        <p v-if="importResult.skipped_count > 0">Bỏ qua <b>{{ importResult.skipped_count }}</b> dòng bị trùng hoặc lỗi.</p>
+        <div class="modal-actions">
+          <button class="btn-ghost" @click="closeImport">Đóng</button>
         </div>
       </div>
     </div>
@@ -437,6 +565,20 @@ input {
   padding: 18px;
 }
 
+.btn-import {
+  border: none;
+  border-radius: 10px;
+  background: #0b7a4b;
+  color: #fff;
+  padding: 10px 16px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-import:disabled { opacity: 0.7; cursor: not-allowed; }
+.preview-table-wrap { margin-top: 10px; max-height: 280px; overflow: auto; border: 1px solid #d4e2d8; border-radius: 8px; }
+.preview-table { width: 100%; border-collapse: collapse; min-width: 560px; }
+.preview-table th, .preview-table td { border-bottom: 1px solid #e0eae3; padding: 8px; text-align: left; font-size: 13px; }
+.preview-table th { background: #edf3ef; color: #15385a; position: sticky; top: 0; z-index: 2; }
 .modal-card h2 { margin: 0 0 12px; color: #007336; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
 .modal-actions { margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end; }

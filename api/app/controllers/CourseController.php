@@ -382,17 +382,25 @@ class CourseController
 
     private function parseCsvRows(string $filePath): array
     {
+        $content = file_get_contents($filePath);
+        if ($content === false) return [];
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content);
+        $content = str_replace(["\r\n", "\r"], "\n", $content);
+        $lines = explode("\n", $content);
         $rows = [];
-        $handle = fopen($filePath, 'rb');
-        if (!$handle) return $rows;
-        while (($data = fgetcsv($handle)) !== false) {
-            $row = [];
-            foreach ($data as $cell) {
-                $row[] = trim((string)$cell);
-            }
-            $rows[] = $row;
+        if (empty($lines)) return $rows;
+        $firstLine = $lines[0];
+        $delimiter = ',';
+        if (substr_count($firstLine, ';') > substr_count($firstLine, ',')) {
+            $delimiter = ';';
+        } elseif (substr_count($firstLine, "\t") > substr_count($firstLine, ',')) {
+            $delimiter = "\t";
         }
-        fclose($handle);
+        foreach ($lines as $line) {
+            if (trim($line) === '') continue;
+            $row = str_getcsv($line, $delimiter, '"', '');
+            $rows[] = array_map('trim', $row);
+        }
         return $rows;
     }
 
@@ -1567,6 +1575,45 @@ class CourseController
         if (empty($rows)) {
             jsonResponse(['status' => 'error', 'message' => 'Không có dữ liệu để import.'], 400);
             return;
+        }
+
+        if ($mode === 'subject') {
+            try {
+                $pdo = get_db_connection();
+                $pdo->exec('PRAGMA busy_timeout = 5000');
+                Course::ensureSchema($pdo);
+                $pdo->beginTransaction();
+                $inserted = 0;
+                $skipped = [];
+                foreach ($rows as $idx => $row) {
+                    $line = $idx + 2;
+                    $data = is_array($row) ? $row : [];
+                    try {
+                        Course::insertSubjectWithPdo($pdo, $data);
+                        $inserted++;
+                    } catch (RuntimeException $e) {
+                        $skipped[] = [
+                            'line' => $line,
+                            'course_code' => trim((string)($data['course_code'] ?? '')),
+                            'reason' => $e->getMessage(),
+                        ];
+                    }
+                }
+                $pdo->commit();
+                jsonResponse([
+                    'status' => 'success',
+                    'inserted_count' => $inserted,
+                    'skipped_count' => count($skipped),
+                    'skipped' => $skipped,
+                ]);
+                return;
+            } catch (Throwable $e) {
+                if (isset($pdo) && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                jsonResponse(['status' => 'error', 'message' => 'Không thể import môn học.', 'detail' => $e->getMessage()], 500);
+                return;
+            }
         }
 
         if ($mode === 'section-lite') {

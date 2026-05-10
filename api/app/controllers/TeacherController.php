@@ -252,17 +252,25 @@ class TeacherController
 
     private function parseCsvRows(string $filePath): array
     {
+        $content = file_get_contents($filePath);
+        if ($content === false) return [];
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content);
+        $content = str_replace(["\r\n", "\r"], "\n", $content);
+        $lines = explode("\n", $content);
         $rows = [];
-        $handle = fopen($filePath, 'rb');
-        if (!$handle) return $rows;
-        while (($data = fgetcsv($handle)) !== false) {
-            $row = [];
-            foreach ($data as $cell) {
-                $row[] = trim((string)$cell);
-            }
-            $rows[] = $row;
+        if (empty($lines)) return $rows;
+        $firstLine = $lines[0];
+        $delimiter = ',';
+        if (substr_count($firstLine, ';') > substr_count($firstLine, ',')) {
+            $delimiter = ';';
+        } elseif (substr_count($firstLine, "\t") > substr_count($firstLine, ',')) {
+            $delimiter = "\t";
         }
-        fclose($handle);
+        foreach ($lines as $line) {
+            if (trim($line) === '') continue;
+            $row = str_getcsv($line, $delimiter, '"', '');
+            $rows[] = array_map('trim', $row);
+        }
         return $rows;
     }
 
@@ -392,14 +400,14 @@ class TeacherController
         $headers = $rawRows[0];
         $headerMap = [];
         $headerAlias = [
-            'teacher_code' => ['msgv', 'magiaovien', 'mgv', 'teachercode'],
+            'teacher_code' => ['msgv', 'magiaovien', 'magiangvien', 'mgv', 'teachercode'],
             'full_name' => ['hoten', 'hten', 'fullname', 'tengiaovien'],
             'date_of_birth' => ['ngaysinh', 'dateofbirth', 'dob'],
             'gender' => ['gioitinh', 'gender'],
             'email' => ['email'],
             'phone' => ['sodienthoai', 'sdt', 'phone'],
             'academic_title' => ['hocham', 'hochamhocvi', 'academictitle'],
-            'department' => ['khoa', 'manganh', 'department', 'departmentcode', 'vien', 'khoavien', 'bomon', 'khoabomon'],
+            'department' => ['khoa', 'makhoa', 'manganh', 'department', 'departmentcode', 'vien', 'khoavien', 'bomon', 'khoabomon'],
             'homeroom_class' => ['lopphutrach', 'lopchunhiem', 'homeroomclass'],
             'status' => ['trangthai', 'status'],
         ];
