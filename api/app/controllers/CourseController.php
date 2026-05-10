@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 require_once __DIR__ . '/../models/Course.php';
 require_once __DIR__ . '/../models/Teacher.php';
 require_once __DIR__ . '/../models/Student.php';
@@ -1383,16 +1383,7 @@ class CourseController
                 return;
             }
 
-            // Check for duplicate course code
-            $courseCodeCheck = strtoupper(trim((string)($data['course_code'] ?? '')));
-            if ($courseCodeCheck !== '') {
-                $dupStmt = $pdo->prepare('SELECT 1 FROM MonHoc WHERE upper(MaMon) = :ma_mon LIMIT 1');
-                $dupStmt->execute([':ma_mon' => $courseCodeCheck]);
-                if ($dupStmt->fetchColumn()) {
-                    jsonResponse(['status' => 'error', 'message' => 'Mã môn học đã tồn tại.', 'fields' => ['course_code' => 'Mã môn học đã tồn tại.']], 409);
-                    return;
-                }
-            }
+           
 
             $roomConflict = $this->findClassroomConflict($pdo, (string)($data['schedule'] ?? ''), (string)($data['classroom'] ?? ''), null);
             if ($roomConflict) {
@@ -1424,14 +1415,6 @@ class CourseController
         } catch (PDOException $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
             $msg = (string)$e->getMessage();
-            if (strpos($msg, 'UNIQUE constraint failed: MonHoc.MaMon') !== false) {
-                jsonResponse([
-                    'status' => 'error',
-                    'message' => 'Mã môn học đã tồn tại.',
-                    'fields' => ['course_code' => 'Mã môn học đã tồn tại.'],
-                ], 409);
-                return;
-            }
             jsonResponse(['status' => 'error', 'message' => 'Không thể tạo lớp học.', 'detail' => $msg], 500);
         } catch (Throwable $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
@@ -2514,6 +2497,7 @@ class CourseController
 
    
     // Nhập điểm cho từng sinh viên và tự động tính tổng kết
+   // CHỈ CẬP NHẬT ĐIỂM CHO 1 SINH VIÊN
     public function submitScore()
     {
         $identity = $this->currentIdentity();
@@ -2526,15 +2510,9 @@ class CourseController
         $maLHP = trim((string)($payload['section_code'] ?? ''));
         $maSV = trim((string)($payload['student_code'] ?? ''));
         
-        // Chấp nhận giá trị 0, chỉ để null nếu không nhập gì
         $cc = isset($payload['cc']) && $payload['cc'] !== '' ? (float)$payload['cc'] : null;
         $gk = isset($payload['gk']) && $payload['gk'] !== '' ? (float)$payload['gk'] : null;
         $ck = isset($payload['ck']) && $payload['ck'] !== '' ? (float)$payload['ck'] : null;
-        
-        // Trọng số từ Frontend
-        $weightCc = isset($payload['weight_cc']) ? (float)$payload['weight_cc'] : null;
-        $weightGk = isset($payload['weight_gk']) ? (float)$payload['weight_gk'] : null;
-        $weightCk = isset($payload['weight_ck']) ? (float)$payload['weight_ck'] : null;
 
         if ($maLHP === '' || $maSV === '') {
             jsonResponse(['status' => 'error', 'message' => 'Thiếu mã lớp hoặc mã sinh viên.'], 400);
@@ -2544,59 +2522,25 @@ class CourseController
         try {
             $pdo = get_db_connection();
             Course::ensureSchema($pdo);
-            
-            // Xác minh quyền: Chỉ Giảng viên phụ trách lớp mới được cập nhật điểm
             $this->verifyClassAccess($pdo, $maLHP, $identity, true);
 
             $pdo->beginTransaction();
             
-            // 1. Cập nhật các đầu điểm thành phần
+            // Cập nhật điểm thành phần
             $stmt = $pdo->prepare(
                 'UPDATE KetQuaHocTap 
                  SET DiemChuyenCan = :cc, DiemGiuaKy = :gk, DiemCuoiKy = :ck 
                  WHERE MaLHP = :ma_lhp AND MaSV = :ma_sv'
             );
-            $stmt->execute([
-                ':cc' => $cc,
-                ':gk' => $gk,
-                ':ck' => $ck,
-                ':ma_lhp' => $maLHP,
-                ':ma_sv' => $maSV
-            ]);
+            $stmt->execute([':cc' => $cc, ':gk' => $gk, ':ck' => $ck, ':ma_lhp' => $maLHP, ':ma_sv' => $maSV]);
 
-            // 2. Cập nhật trọng số vào LopHocPhan (nếu có)
-            if ($weightCc !== null || $weightGk !== null || $weightCk !== null) {
-                $updateFields = [];
-                $params = [':ma_lhp' => $maLHP];
-                
-                if ($weightCc !== null) {
-                    $updateFields[] = 'TrongSoCC = :w_cc';
-                    $params[':w_cc'] = $weightCc;
-                }
-                if ($weightGk !== null) {
-                    $updateFields[] = 'TrongSoGK = :w_gk';
-                    $params[':w_gk'] = $weightGk;
-                }
-                if ($weightCk !== null) {
-                    $updateFields[] = 'TrongSoCK = :w_ck';
-                    $params[':w_ck'] = $weightCk;
-                }
-                
-                if (!empty($updateFields)) {
-                    $sql = 'UPDATE LopHocPhan SET ' . implode(', ', $updateFields) . ' WHERE MaLHP = :ma_lhp';
-                    $stmt = $pdo->prepare($sql);
-                    $stmt->execute($params);
-                }
-            }
-
-            // 3. GỌI LOGIC TÍNH TỔNG KẾT (Hàm đã viết ở Model Course.php)
-            // Việc này giúp đồng bộ điểm tổng kết ngay lập tức dựa trên trọng số lớp
+            // Tính điểm tổng kết (Model tự lấy Trọng số từ DB)
             Course::updateFinalGradeWithPdo($pdo, $maLHP, $maSV);
 
             $pdo->commit();
 
-            // 4. Lấy lại dữ liệu sau khi tính toán để trả về FE (giúp bảng điểm cập nhật ngay)
-            $stmtResult = $pdo->prepare('SELECT DiemTongKet FROM KetQuaHocTap WHERE MaLHP = :ma_lhp AND MaSV = :ma_sv');
+            // Lấy điểm tổng kết mới trả về FE
+            $stmtResult = $pdo->prepare('SELECT DiemTongKet FROM KetQuaHocTap WHERE MaLHP = :ma_lhp AND MaSV = :ma_sv LIMIT 1');
             $stmtResult->execute([':ma_lhp' => $maLHP, ':ma_sv' => $maSV]);
             $newTotal = $stmtResult->fetchColumn();
 
@@ -2608,6 +2552,107 @@ class CourseController
                     'total_score' => $newTotal !== false ? (float)$newTotal : null,
                     'letter_grade' => $this->letterGrade($newTotal)
                 ]
+            ]);
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+    // HÀM MỚI: CÀI ĐẶT TRỌNG SỐ CHO CẢ LỚP
+    public function updateWeights()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+
+        $payload = $this->parseJsonPayload();
+        $maLHP = trim((string)($payload['section_code'] ?? ''));
+        $wCc = (float)($payload['weight_cc'] ?? 0);
+        $wGk = (float)($payload['weight_gk'] ?? 0);
+        $wCk = (float)($payload['weight_ck'] ?? 0);
+
+        if ($maLHP === '') {
+            jsonResponse(['status' => 'error', 'message' => 'Thiếu mã lớp học phần.'], 400);
+            return;
+        }
+        
+        // Validate tổng trọng số bằng 1.0 (hoặc 100 tùy nghiệp vụ)
+        if (abs(($wCc + $wGk + $wCk) - 1.0) > 0.01) {
+            jsonResponse(['status' => 'error', 'message' => 'Tổng các trọng số phải bằng 1.0'], 422);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            Course::ensureSchema($pdo);
+            $this->verifyClassAccess($pdo, $maLHP, $identity, true);
+
+            $pdo->beginTransaction();
+
+            // 1. Lưu trọng số mới vào bảng Lớp học phần
+            $stmt = $pdo->prepare('UPDATE LopHocPhan SET TrongSoCC = :cc, TrongSoGK = :gk, TrongSoCK = :ck WHERE MaLHP = :ma_lhp');
+            $stmt->execute([':cc' => $wCc, ':gk' => $wGk, ':ck' => $wCk, ':ma_lhp' => $maLHP]);
+
+            // 2. Tính lại điểm cho TOÀN BỘ sinh viên trong lớp
+            $stmtAllSv = $pdo->prepare('SELECT MaSV FROM KetQuaHocTap WHERE MaLHP = :ma_lhp');
+            $stmtAllSv->execute([':ma_lhp' => $maLHP]);
+            $allSv = $stmtAllSv->fetchAll(PDO::FETCH_COLUMN);
+            
+            foreach ($allSv as $svCode) {
+                Course::updateFinalGradeWithPdo($pdo, $maLHP, (string)$svCode);
+            }
+
+            $pdo->commit();
+
+            // 3. Lấy danh sách sinh viên cập nhật với điểm mới
+            $scoreMap = Course::getScoresByCourseId(0); // Get scores using legacy approach
+            // Query directly for this section's students
+            $stmtStudents = $pdo->prepare(
+                'SELECT s.MaSV AS student_code, s.HoTen AS full_name, s.MaLop AS class_name, ng.TenNganh AS major, s.Email AS email
+                 FROM KetQuaHocTap k
+                 INNER JOIN SinhVien s ON s.MaSV = k.MaSV
+                 LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
+                 LEFT JOIN Nganh ng ON ng.MaNganh = l.MaNganh
+                 WHERE k.MaLHP = :ma_lhp
+                 ORDER BY s.MaSV ASC'
+            );
+            $stmtStudents->execute([':ma_lhp' => $maLHP]);
+            $students = $stmtStudents->fetchAll(PDO::FETCH_ASSOC);
+
+            // Get updated scores for all students
+            $stmtScores = $pdo->prepare(
+                'SELECT MaSV, DiemChuyenCan, DiemGiuaKy, DiemCuoiKy, DiemTongKet FROM KetQuaHocTap WHERE MaLHP = :ma_lhp'
+            );
+            $stmtScores->execute([':ma_lhp' => $maLHP]);
+            $scoreData = $stmtScores->fetchAll(PDO::FETCH_ASSOC);
+            $scoreMap = [];
+            foreach ($scoreData as $row) {
+                $scoreMap[(string)$row['MaSV']] = [
+                    'cc' => $row['DiemChuyenCan'] !== null ? (float)$row['DiemChuyenCan'] : null,
+                    'gk' => $row['DiemGiuaKy'] !== null ? (float)$row['DiemGiuaKy'] : null,
+                    'ck' => $row['DiemCuoiKy'] !== null ? (float)$row['DiemCuoiKy'] : null,
+                    'total' => $row['DiemTongKet'] !== null ? (float)$row['DiemTongKet'] : null
+                ];
+            }
+
+            // Add scores to students
+            foreach ($students as &$student) {
+                $code = (string)$student['student_code'];
+                $score = $scoreMap[$code] ?? ['cc' => null, 'gk' => null, 'ck' => null, 'total' => null];
+                $student['cc'] = $score['cc'];
+                $student['gk'] = $score['gk'];
+                $student['ck'] = $score['ck'];
+                $student['total'] = $score['total'];
+                $student['letter'] = $this->letterGrade($score['total']);
+            }
+            unset($student);
+
+            jsonResponse([
+                'status' => 'success', 
+                'message' => 'Đã cập nhật trọng số và tính lại điểm cho toàn lớp!',
+                'students' => $students
             ]);
         } catch (Throwable $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
