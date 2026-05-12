@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -294,13 +294,14 @@ async function buildImportPreview(file) {
       gender: gender,
       class_name: className,
       major: '', // <-- ĐÃ THÊM: Khởi tạo cột Ngành rỗng
+      validity_status: '', // <-- THÊM: Tính trạng (Hợp lệ / Không tồn tại)
     })
   }
   
   // Gán mảng vào Proxy để Vue bắt đầu theo dõi
   importPreviewRows.value = rows
 
-  // BẮT ĐẦU CHỌC DB ĐỂ LẤY THÔNG TIN ĐẮP VÀO
+  // BẮT ĐẦU CHỌC DB ĐỂ LẤY THÔNG TIN VÀ KIỂM TRA TÍNH TRẠNG
   if (rows.length > 0) {
     importPreviewLoading.value = true
     try {
@@ -308,6 +309,9 @@ async function buildImportPreview(file) {
       
       for (const row of reactiveRows) {
         try {
+          // Mặc định là đang kiểm tra
+          row.validity_status = 'checking'
+          
           const res = await fetch(`/api/students?keyword=${encodeURIComponent(row.student_code)}`)
           if (res.ok) {
             const data = await res.json()
@@ -320,14 +324,19 @@ async function buildImportPreview(file) {
               row.date_of_birth = dbStudent.date_of_birth || row.date_of_birth
               row.gender = dbStudent.gender || row.gender
               row.class_name = dbStudent.class_name || row.class_name
-              row.major = dbStudent.major || '-' // <-- ĐÃ THÊM: Gán dữ liệu Ngành từ DB
+              row.major = dbStudent.major || '-'
+              row.validity_status = 'valid' // Sinh viên tồn tại
             } else {
               row.full_name = row.full_name || '(Không có trong hệ thống)'
-              row.major = '-' // <-- ĐÃ THÊM: Nếu không có sinh viên thì để dấu trừ
+              row.major = '-'
+              row.validity_status = 'not_found' // Sinh viên không tồn tại
             }
+          } else {
+            row.validity_status = 'error' // Lỗi khi fetch
           }
         } catch (err) {
           console.error('Lỗi khi fetch sinh viên:', row.student_code, err)
+          row.validity_status = 'error'
         }
       }
     } finally {
@@ -634,7 +643,8 @@ async function submitForm() {
                   <th>Ngày sinh</th>
                   <th>Giới tính</th>
                   <th>Lớp</th>
-                    <th>Ngành</th>
+                  <th>Ngành</th>
+                  <th>Tính trạng</th>
                 </tr>
               </thead>
               <tbody>
@@ -645,6 +655,20 @@ async function submitForm() {
                   <td>{{ row.gender }}</td>
                   <td>{{ row.class_name }}</td>
                   <td>{{ row.major }}</td>
+                  <td>
+                    <div v-if="row.validity_status === 'checking'" class="status-badge checking">
+                      <span class="spinner-mini"></span> Đang kiểm tra...
+                    </div>
+                    <div v-else-if="row.validity_status === 'valid'" class="status-badge valid">
+                      ✓ Hợp lệ
+                    </div>
+                    <div v-else-if="row.validity_status === 'not_found'" class="status-badge invalid">
+                      ✗ Không tồn tại
+                    </div>
+                    <div v-else class="status-badge error">
+                      ⚠ Lỗi kiểm tra
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -746,6 +770,57 @@ input, select { width: 100%; box-sizing: border-box; border: 1px solid #c7d3e2; 
 .hint-line {
   color: #33435c;
 }
+
+/* Student Validation Status */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-badge.valid {
+  background: #d1f2e5;
+  color: #0d7a4b;
+  border: 1px solid #a8e6d4;
+}
+
+.status-badge.invalid {
+  background: #fde2e2;
+  color: #a92a2a;
+  border: 1px solid #f5b3b3;
+}
+
+.status-badge.error {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeaa7;
+}
+
+.status-badge.checking {
+  background: #e7f1f8;
+  color: #0b5394;
+  border: 1px solid #cfe2f3;
+}
+
+.spinner-mini {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
   .inline-row,
