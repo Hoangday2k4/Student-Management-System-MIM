@@ -2269,28 +2269,43 @@ class CourseController
     // Phần điểm danh
     private function verifyClassAccess(PDO $pdo, string $maLHP, array $identity, bool $requireTeacher = true)
     {
-        $stmt = $pdo->prepare('SELECT MaGV, TrangThai FROM LopHocPhan WHERE MaLHP = :ma LIMIT 1');
+        $stmt = $pdo->prepare('SELECT MaGV, TrangThai, NgayHetHan, IsLocked FROM LopHocPhan WHERE MaLHP = :ma LIMIT 1');
         $stmt->execute([':ma' => $maLHP]);
         $lhp = $stmt->fetch(PDO::FETCH_ASSOC);
 
         if (!$lhp) throw new RuntimeException("Không tìm thấy lớp học phần.");
 
-        // Chốt chặn trạng thái lớp
-        if ($requireTeacher && ($lhp['TrangThai'] ?? '') === 'COMPLETED') {
-            throw new RuntimeException("Lớp học đã kết thúc. Không thể thay đổi dữ liệu!");
-        }
-
         $role = $identity['account_type'] ?? '';
         $loginId = $identity['login_id'] ?? '';
 
-        if ($role === 'staff') return true; // Admin được qua hết
+        // 1. Admin/Staff được toàn quyền (Bỏ qua mọi rào cản)
+        if ($role === 'staff') return true;
 
         if ($requireTeacher) {
+            // Kiểm tra đúng giảng viên phụ trách không
             if ($role !== 'teacher' || (string)$lhp['MaGV'] !== $loginId) {
                 throw new RuntimeException("Truy cập bị từ chối: Bạn không phải giảng viên phụ trách lớp này!");
             }
+
+            // KIỂM TRA LỚP BỊ ADMIN KHÓA CHỦ ĐỘNG
+            if ((int)($lhp['IsLocked'] ?? 0) === 1) {
+                throw new RuntimeException("Lớp học đã bị Phòng Đào tạo khóa. Không thể thay đổi dữ liệu.");
+            }
+
+            // KIỂM TRA QUÁ HẠN (4 tháng)
+            if (!empty($lhp['NgayHetHan'])) {
+                $deadline = strtotime($lhp['NgayHetHan']);
+                if (time() > $deadline) {
+                    throw new RuntimeException("Đã quá thời hạn cập nhật dữ liệu (" . date('d/m/Y H:i', $deadline) . ").");
+                }
+            }
+
+            // Kiểm tra trạng thái đã kết thúc
+            if (($lhp['TrangThai'] ?? '') === 'COMPLETED') {
+                throw new RuntimeException("Lớp học đã kết thúc. Không thể thay đổi dữ liệu!");
+            }
         } else {
-            // Dành cho Sinh viên xem điểm danh
+            // Dành cho Sinh viên (Chỉ được xem)
             if ($role === 'student') {
                 $check = $pdo->prepare('SELECT 1 FROM KetQuaHocTap WHERE MaLHP = :ma AND MaSV = :sv LIMIT 1');
                 $check->execute([':ma' => $maLHP, ':sv' => $loginId]);
@@ -2300,6 +2315,20 @@ class CourseController
             }
         }
         return true;
+    }
+
+    // Mark course as started (IsStarted = 1) when first data is entered
+    // Also set NgayHetHan if not already set (4 months from now)
+    private function markCourseAsStarted(PDO $pdo, string $maLHP): void
+    {
+        $stmt = $pdo->prepare(
+            'UPDATE LopHocPhan SET 
+              IsStarted = 1, 
+              StartedAt = datetime("now", "localtime"),
+              NgayHetHan = COALESCE(NgayHetHan, datetime("now", "localtime", "+4 months"))
+             WHERE MaLHP = :ma AND IsStarted = 0'
+        );
+        $stmt->execute([':ma' => $maLHP]);
     }
 
 
@@ -2323,6 +2352,10 @@ class CourseController
             $this->verifyClassAccess($pdo, $maLHP, $identity, true);
 
             $pdo->beginTransaction();
+            
+            // Mark course as started when first lesson is created
+            $this->markCourseAsStarted($pdo, $maLHP);
+            
             $lessonNum = Course::createNewLessonWithPdo($pdo, $maLHP);
             $pdo->commit();
 
@@ -2360,6 +2393,10 @@ class CourseController
             $this->verifyClassAccess($pdo, $maLHP, $identity, true);
 
             $pdo->beginTransaction();
+            
+            // Mark course as started when first attendance is submitted
+            $this->markCourseAsStarted($pdo, $maLHP);
+            
             foreach ($attendanceList as $st) {
                 $maSV = trim((string)($st['student_code'] ?? ''));
                 $isAbsent = (bool)($st['is_absent'] ?? false);
@@ -2526,6 +2563,9 @@ class CourseController
 
             $pdo->beginTransaction();
             
+            // Mark course as started when first score is entered
+            $this->markCourseAsStarted($pdo, $maLHP);
+            
             // Cập nhật điểm thành phần
             $stmt = $pdo->prepare(
                 'UPDATE KetQuaHocTap 
@@ -2657,6 +2697,56 @@ class CourseController
         } catch (Throwable $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
             jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+
+    // HÀM MỚI: Dành riêng cho Admin Khóa/Mở lớp hoặc gia hạn
+    public function toggleLock()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+        if (!$this->isStaff($identity)) {
+            jsonResponse(['status' => 'error', 'message' => 'Chỉ Phòng Đào tạo mới có quyền này.'], 403);
+            return;
+        }
+
+        $payload = $this->parseJsonPayload();
+        $maLHP = trim((string)($payload['section_code'] ?? ''));
+        $isLocked = isset($payload['is_locked']) ? (int)$payload['is_locked'] : 0;
+        $ngayHetHan = trim((string)($payload['ngay_het_han'] ?? ''));
+
+        if ($maLHP === '') {
+            jsonResponse(['status' => 'error', 'message' => 'Thiếu mã lớp học phần.'], 400);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            $pdo->beginTransaction();
+
+            $sql = 'UPDATE LopHocPhan SET IsLocked = :is_locked';
+            $params = [':is_locked' => $isLocked, ':ma_lhp' => $maLHP];
+
+            // Nếu Admin có nhập ngày mới để gia hạn
+            if ($ngayHetHan !== '') {
+                $sql .= ', NgayHetHan = :ngay_het_han';
+                $params[':ngay_het_han'] = $ngayHetHan;
+            }
+
+            $sql .= ' WHERE MaLHP = :ma_lhp';
+
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+
+            $pdo->commit();
+            jsonResponse(['status' => 'success', 'message' => 'Đã cập nhật trạng thái khóa lớp thành công!']);
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => 'Không thể cập nhật.', 'detail' => $e->getMessage()], 500);
         }
     }
 }
