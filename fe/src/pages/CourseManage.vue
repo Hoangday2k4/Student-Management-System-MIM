@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -191,6 +191,53 @@ function buildQuery() {
   return params.toString()
 }
 
+// Tính toán phần trăm tiến độ dựa trên deadline
+function getProgressPercentage(course) {
+  // Progress only shown when course is started
+  if (!course?.IsStarted) return 0
+  if (!course?.NgayHetHan) return 0
+  
+  const now = Date.now()
+  const deadline = new Date(course.NgayHetHan).getTime()
+  
+  // Progress starts from when course is marked as started
+  // Use StartedAt if available (time when IsStarted = 1 first set), otherwise use created_at
+  let startTime
+  if (course.StartedAt) {
+    startTime = new Date(course.StartedAt).getTime()
+  } else if (course.created_at) {
+    startTime = new Date(course.created_at).getTime()
+  } else {
+    // Default: 4 months before deadline
+    startTime = deadline - (4 * 30 * 24 * 60 * 60 * 1000)
+  }
+  
+  const total = deadline - startTime
+  const elapsed = now - startTime
+  const percentage = Math.max(0, Math.min(100, (elapsed / total) * 100))
+  
+  return Math.round(percentage)
+}
+
+// Tính thời gian còn lại
+function getRemainingTime(course) {
+  if (!course?.NgayHetHan) return ''
+  
+  const now = Date.now()
+  const deadline = new Date(course.NgayHetHan).getTime()
+  const diff = deadline - now
+  
+  if (diff <= 0) return 'ĐÃ KẾT THÚC'
+  
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000))
+  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
+  
+  if (days > 0) {
+    return `${days}d ${hours}h`
+  }
+  return `${hours}h`
+}
+
 async function doSearch() {
   searched.value = true
   loading.value = true
@@ -292,6 +339,7 @@ onMounted(async () => {
                 <th>Môn học</th>
                 <th>Số tín chỉ</th>
                 <th>Khoa quản lý</th>
+                <th>Tiến độ</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -309,6 +357,16 @@ onMounted(async () => {
                 <td>{{ course.credits ?? '-' }}</td>
                 <td>
                   <div class="major-chip">{{ course.department_name || course.department_code || '-' }}</div>
+                </td>
+                <td>
+                  <div v-if="course?.IsStarted && course?.NgayHetHan" class="progress-cell">
+                    <div class="progress-mini">
+                      <div class="progress-bar-mini" :style="{ width: getProgressPercentage(course) + '%' }"></div>
+                    </div>
+                    <span class="progress-text">{{ getProgressPercentage(course) }}% ({{ getRemainingTime(course) }})</span>
+                  </div>
+                  <span v-else-if="!course?.IsStarted" class="text-muted">Chưa bắt đầu</span>
+                  <span v-else class="text-muted">Chưa có hạn</span>
                 </td>
                 <td class="action-cell">
                   <button class="icon-btn" type="button" title="Xem" @click="viewSubject(course)">
@@ -582,6 +640,39 @@ input {
 .modal-card h2 { margin: 0 0 12px; color: #007336; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
 .modal-actions { margin-top: 14px; display: flex; gap: 10px; justify-content: flex-end; }
+
+/* Progress Bar */
+.progress-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.progress-mini {
+  width: 100%;
+  height: 6px;
+  background: #e3e9f2;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-mini {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+  transition: width 0.3s ease;
+  border-radius: 3px;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
+}
+
+.text-muted {
+  color: #999;
+  font-size: 12px;
+}
 
 @media (max-width: 1080px) {
   .toolbar { grid-template-columns: 1fr; }
