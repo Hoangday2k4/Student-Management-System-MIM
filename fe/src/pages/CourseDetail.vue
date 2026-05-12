@@ -41,8 +41,42 @@ const weightForm = ref({
   weight_ck: 0.6
 })
 
+// Lock/Expire states
+const adminDeadlineEdit = ref('')
+
 const isStaff = computed(() => accountType.value === 'staff')
 const isTeacher = computed(() => accountType.value === 'teacher')
+
+// Course status flags
+const isStarted = computed(() => Number(course.value?.IsStarted) === 1)
+
+// 1. Các biến kiểm tra trạng thái khóa/hạn chót
+const isLocked = computed(() => Number(course.value?.IsLocked) === 1)
+
+const isExpired = computed(() => {
+  if (!course.value?.NgayHetHan) return false
+  return new Date(course.value.NgayHetHan).getTime() < Date.now()
+})
+
+// Course status display (3 states: Not started, In progress, Expired)
+const courseStatus = computed(() => {
+  if (isLocked.value || isExpired.value) return 'expired'
+  if (!isStarted.value) return 'not-started'
+  return 'in-progress'
+})
+
+const courseStatusText = computed(() => {
+  if (isLocked.value) return 'LỚP HỌC ĐÃ KẾT THÚC'
+  if (isExpired.value) return 'ĐÃ KẾT THÚC'
+  if (!isStarted.value) return 'CHƯA BẮT ĐẦU'
+  return 'ĐANG DIỄN RA'
+})
+
+// Trạng thái tổng hợp: Không cho phép chỉnh sửa nếu bị khóa hoặc quá hạn (trừ Admin)
+const isReadOnly = computed(() => {
+  if (isStaff.value) return false // Admin luôn được thao tác
+  return isLocked.value || isExpired.value
+})
 
 
 
@@ -106,6 +140,90 @@ function goUpdate() {
     return
   }
   router.push({ path: '/courses/update', query: { id: String(course.value.id), ...searchQuery.value } })
+}
+
+// Format ngày tháng hiển thị cho đẹp (DD/MM/YYYY HH:mm)
+function formatDateTimeDisplay(dateString) {
+  if (!dateString) return ''
+  const d = new Date(dateString)
+  return d.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })
+}
+
+// Tính toán phần trăm tiến độ dựa trên deadline
+function getProgressPercentage() {
+  // Progress only shown when course is started
+  if (!isStarted.value) return 0
+  if (!course.value?.NgayHetHan) return 0
+  
+  const now = Date.now()
+  const deadline = new Date(course.value.NgayHetHan).getTime()
+  
+  // Progress starts from when course is marked as started
+  // Use StartedAt if available (time when IsStarted = 1 first set), otherwise use CreatedAt
+  let startTime
+  if (course.value.StartedAt) {
+    startTime = new Date(course.value.StartedAt).getTime()
+  } else if (course.value.created_at) {
+    startTime = new Date(course.value.created_at).getTime()
+  } else {
+    // Default: 4 months before deadline
+    startTime = deadline - (4 * 30 * 24 * 60 * 60 * 1000)
+  }
+  
+  const total = deadline - startTime
+  const elapsed = now - startTime
+  const percentage = Math.max(0, Math.min(100, (elapsed / total) * 100))
+  
+  return Math.round(percentage)
+}
+
+// Tính thời gian còn lại (nhân dân tính)
+function getRemainingTime() {
+  if (!course.value?.NgayHetHan) return ''
+  
+  const now = Date.now()
+  const deadline = new Date(course.value.NgayHetHan).getTime()
+  const diff = deadline - now
+  
+  if (diff <= 0) return 'ĐÃ KẾT THÚC'
+  
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000))
+  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
+  
+  if (days > 0) {
+    return `Còn ${days} ngày ${hours} giờ`
+  }
+  return `Còn ${hours} giờ`
+}
+
+// 2. Hàm gọi API dành cho Admin để khóa/mở khóa lớp
+async function toggleCourseLock() {
+  const newLockStatus = isLocked.value ? 0 : 1
+  const actionText = newLockStatus === 1 ? 'KHÓA' : 'MỞ KHÓA'
+  
+  if (!confirm(`Bạn có chắc muốn ${actionText} lớp học phần này?`)) return
+
+  try {
+    const res = await fetch('/api/courses/detail?action=toggle-lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        section_code: course.value.section_code,
+        is_locked: newLockStatus
+      })
+    })
+    
+    const payload = await res.json().catch(() => ({}))
+    if (!res.ok || payload.status !== 'success') {
+      alert(payload.message || 'Lỗi cập nhật trạng thái.')
+      return
+    }
+
+    alert('Cập nhật trạng thái thành công!')
+    await loadPage() // Tải lại trang để dữ liệu mới nhất hiển thị
+  } catch (error) {
+    alert('Lỗi kết nối máy chủ.')
+  }
 }
 
 async function loadPage() {
@@ -220,6 +338,17 @@ async function saveAttendance() {
     }
 
     errorMessage.value = ''
+    // Mark course as started on first attendance entry
+    if (!isStarted.value) {
+      course.value.IsStarted = 1
+      course.value.StartedAt = new Date().toISOString()
+      // Set deadline to 4 months from now if not already set
+      if (!course.value.NgayHetHan) {
+        const deadline = new Date()
+        deadline.setMonth(deadline.getMonth() + 4)
+        course.value.NgayHetHan = deadline.toISOString()
+      }
+    }
     showAttendanceModal.value = false
     alert(payload.message || 'Lưu điểm danh thành công!')
   } catch (error) {
@@ -249,6 +378,17 @@ async function createLesson() {
     totalLessons.value += 1
     currentWeek.value = totalLessons.value  // Highlight newly created lesson
     attendanceList.value = []  // Clear old data
+    // Mark course as started on first lesson creation
+    if (!isStarted.value) {
+      course.value.IsStarted = 1
+      course.value.StartedAt = new Date().toISOString()
+      // Set deadline to 4 months from now if not already set
+      if (!course.value.NgayHetHan) {
+        const deadline = new Date()
+        deadline.setMonth(deadline.getMonth() + 4)
+        course.value.NgayHetHan = deadline.toISOString()
+      }
+    }
     alert(payload.message || 'Tạo buổi học mới thành công!')
   } catch (error) {
     errorMessage.value = 'Không kết nối được máy chủ.'
@@ -340,6 +480,17 @@ async function saveScore() {
     }
 
     errorMessage.value = ''
+    // Mark course as started on first score entry
+    if (!isStarted.value) {
+      course.value.IsStarted = 1
+      course.value.StartedAt = new Date().toISOString()
+      // Set deadline to 4 months from now if not already set
+      if (!course.value.NgayHetHan) {
+        const deadline = new Date()
+        deadline.setMonth(deadline.getMonth() + 4)
+        course.value.NgayHetHan = deadline.toISOString()
+      }
+    }
     showScoreModal.value = false
     
     // Update student in list with scores and calculated total
@@ -426,6 +577,35 @@ async function saveWeights() {
       <p v-if="loading" class="state">Đang tải dữ liệu...</p>
       <p v-else-if="errorMessage" class="state error">{{ errorMessage }}</p>
       <template v-else-if="course">
+        <!-- Status Banner -->
+        <div class="status-banner" :class="courseStatus">
+          <div class="status-info">
+            <i class="fa-solid" :class="courseStatus === 'not-started' ? 'fa-hourglass-start' : (courseStatus === 'in-progress' ? 'fa-door-open' : 'fa-lock')"></i>
+            <span style="margin-left: 8px;">
+              Trạng thái: 
+              <strong>{{ courseStatusText }}</strong>
+            </span>
+          </div>
+
+          <div v-if="isStaff" class="admin-controls">
+            <button class="btn-sm" :class="isLocked ? 'btn-success' : 'btn-danger'" @click="toggleCourseLock">
+              {{ isLocked ? 'Mở Lớp' : 'Khóa Lớp' }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Progress Bar Section -->
+        <div v-if="isStarted && course?.NgayHetHan" class="progress-section">
+          <div class="progress-header">
+            <span class="progress-label">Tiến độ:</span>
+            <span class="progress-percentage">{{ getProgressPercentage() }}%</span>
+            <span class="remaining-time">{{ getRemainingTime() }}</span>
+          </div>
+          <div class="progress-bar-container">
+            <div class="progress-bar" :style="{ width: getProgressPercentage() + '%' }"></div>
+          </div>
+        </div>
+
         <div class="info-grid">
           <div class="info-row">
             <div class="info-pair">
@@ -493,7 +673,7 @@ async function saveWeights() {
 
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
           <h2 style="margin: 0;">Danh sách sinh viên</h2>
-          <button v-if="isTeacher || isStaff" class="btn-primary" @click="openWeightModal" style="margin: 0;">
+          <button v-if="isTeacher || isStaff" class="btn-primary" @click="openWeightModal" :disabled="isReadOnly" style="margin: 0;">
             Trọng số
           </button>
         </div>
@@ -511,7 +691,7 @@ async function saveWeights() {
                 <th>Điểm GK</th>
                 <th>Điểm CK</th>
                 <th>Tổng kết</th>
-                <th style="text-align: center;">Thao tác</th>
+               <th v-if="isTeacher || isStaff" style="text-align: center;">Thao tác</th>
               </tr>
             </thead>
             <tbody>
@@ -534,7 +714,7 @@ async function saveWeights() {
                 </td>
                 
                 <td style="text-align: center;">
-                  <button v-if="isTeacher || isStaff" class="btn-ghost btn-sm" @click="openScoreModal(student)">
+                  <button v-if="isTeacher || isStaff" class="btn-ghost btn-sm" @click="openScoreModal(student)" :disabled="isReadOnly">
                     Nhập điểm
                   </button>
                 </td>
@@ -545,7 +725,7 @@ async function saveWeights() {
 
         <hr class="section-divider" />
 
-        <div class="attendance-section">
+        <div v-if="students.length > 0" class="attendance-section">
           <h2>Điểm danh buổi học</h2>
           
           <div v-if="totalLessons === 0" class="state">
@@ -568,8 +748,8 @@ async function saveWeights() {
               </div>
               
               <div class="lesson-actions" v-if="isTeacher || isStaff">
-                <button class="btn-ghost" @click="createLesson">+ Tạo buổi mới</button>
-                <button class="btn-danger" @click="deleteLesson">Xóa buổi {{ currentWeek }}</button>
+                <button class="btn-ghost" @click="createLesson" :disabled="isReadOnly">+ Tạo buổi mới</button>
+                <button class="btn-danger" @click="deleteLesson" :disabled="isReadOnly">Xóa buổi {{ currentWeek }}</button>
               </div>
             </div>
           </div>
@@ -627,7 +807,7 @@ async function saveWeights() {
             </div>
 
             <div class="modal-footer">
-              <button v-if="isTeacher || isStaff" class="btn-primary" @click="saveAttendance">Lưu điểm danh</button>
+              <button v-if="isTeacher || isStaff" class="btn-primary" @click="saveAttendance" :disabled="isReadOnly">Lưu điểm danh</button>
               <button class="btn-ghost" @click="showAttendanceModal = false">Đóng</button>
             </div>
           </div>
@@ -665,7 +845,7 @@ async function saveWeights() {
             </div>
 
             <div class="modal-footer">
-              <button class="btn-primary" @click="saveScore">Lưu điểm</button>
+              <button class="btn-primary" @click="saveScore" :disabled="isReadOnly">Lưu điểm</button>
               <button class="btn-ghost" @click="showScoreModal = false">Hủy</button>
             </div>
           </div>
@@ -703,7 +883,7 @@ async function saveWeights() {
             </div>
 
             <div class="modal-footer">
-              <button class="btn-primary" @click="saveWeights">Cập nhật</button>
+              <button class="btn-primary" @click="saveWeights" :disabled="isReadOnly">Cập nhật</button>
               <button class="btn-ghost" @click="showWeightModal = false">Hủy</button>
             </div>
           </div>
@@ -976,9 +1156,191 @@ h2 { margin-top: 22px; }
   text-align: center;
 }
 
+/* Status Banner */
+.status-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+}
+
+.status-banner.not-started {
+  background-color: #f5f3ff;
+  border: 1px solid #ddd6fe;
+  color: #5b21b6;
+}
+
+.status-banner.in-progress {
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.status-banner.expired {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.status-banner.active {
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.status-banner.locked {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.status-info {
+  display: flex;
+  align-items: center;
+  flex: 1;
+}
+
+.deadline-text {
+  margin-left: 12px;
+  font-style: italic;
+  font-size: 13px;
+}
+
+.text-muted {
+  opacity: 0.7;
+}
+
+.admin-controls {
+  display: flex;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px dashed currentColor;
+}
+
+.date-input {
+  padding: 4px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.btn-success {
+  background: #10b981;
+  color: #fff;
+  border: none;
+}
+
+.btn-success:hover:not(:disabled) {
+  background: #059669;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #a01f20;
+  color: #fff;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Progress Bar */
+.progress-section {
+  background: #f9fafb;
+  border: 1px solid #e3e9f2;
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 20px;
+}
+
+.progress-section.muted {
+  text-align: center;
+  color: #999;
+  font-style: italic;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.progress-label {
+  font-weight: 600;
+  color: #1f3553;
+}
+
+.progress-percentage {
+  font-weight: 700;
+  color: #007336;
+  font-size: 14px;
+}
+
+.remaining-time {
+  color: #d97706;
+  font-weight: 600;
+}
+
+.progress-bar-container {
+  width: 100%;
+  height: 8px;
+  background: #e3e9f2;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 8px 0;
+}
+
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+  transition: width 0.3s ease;
+  border-radius: 4px;
+}
+
+.progress-footer {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #666;
+  margin-top: 8px;
+}
+
+.deadline-label {
+  font-weight: 600;
+}
+
+.deadline-value {
+  color: #d97706;
+  font-weight: 600;
+}
+
 @media (max-width: 900px) {
   .info-row { grid-template-columns: 1fr; gap: 8px; }
   .info-pair,
   .full-pair { grid-template-columns: 1fr; gap: 2px; }
+  
+  .status-banner {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  
+  .admin-controls {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .progress-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
 }
 </style>
