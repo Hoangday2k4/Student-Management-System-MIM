@@ -339,7 +339,7 @@ onMounted(async () => {
                 <th>Môn học</th>
                 <th>Số tín chỉ</th>
                 <th>Khoa quản lý</th>
-                <th>Tiến độ</th>
+            
                 <th>Action</th>
               </tr>
             </thead>
@@ -358,16 +358,12 @@ onMounted(async () => {
                 <td>
                   <div class="major-chip">{{ course.department_name || course.department_code || '-' }}</div>
                 </td>
-                <td>
-                  <div v-if="course?.IsStarted && course?.NgayHetHan" class="progress-cell">
-                    <div class="progress-mini">
-                      <div class="progress-bar-mini" :style="{ width: getProgressPercentage(course) + '%' }"></div>
-                    </div>
-                    <span class="progress-text">{{ getProgressPercentage(course) }}% ({{ getRemainingTime(course) }})</span>
-                  </div>
-                  <span v-else-if="!course?.IsStarted" class="text-muted">Chưa bắt đầu</span>
-                  <span v-else class="text-muted">Chưa có hạn</span>
-                </td>
+            
+                 
+                    
+               
+                  
+              
                 <td class="action-cell">
                   <button class="icon-btn" type="button" title="Xem" @click="viewSubject(course)">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
