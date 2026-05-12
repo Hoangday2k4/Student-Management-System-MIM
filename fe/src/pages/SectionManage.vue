@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -40,6 +40,53 @@ function formatSemester(row) {
   const label = semester === 1 ? 'I' : semester === 2 ? 'II' : semester === 3 ? 'Kỳ hè' : '-'
   const year = String(row?.academic_year || '').trim()
   return year ? `${label} (${year})` : label
+}
+
+// Tính toán phần trăm tiến độ dựa trên deadline
+function getProgressPercentage(item) {
+  // Progress only shown when course is started
+  if (!item?.IsStarted) return 0
+  if (!item?.NgayHetHan) return 0
+  
+  const now = Date.now()
+  const deadline = new Date(item.NgayHetHan).getTime()
+  
+  // Progress starts from when course is marked as started
+  // Use StartedAt if available (time when IsStarted = 1 first set), otherwise use created_at
+  let startTime
+  if (item.StartedAt) {
+    startTime = new Date(item.StartedAt).getTime()
+  } else if (item.created_at) {
+    startTime = new Date(item.created_at).getTime()
+  } else {
+    // Default: 4 months before deadline
+    startTime = deadline - (4 * 30 * 24 * 60 * 60 * 1000)
+  }
+  
+  const total = deadline - startTime
+  const elapsed = now - startTime
+  const percentage = Math.max(0, Math.min(100, (elapsed / total) * 100))
+  
+  return Math.round(percentage)
+}
+
+// Tính thời gian còn lại
+function getRemainingTime(item) {
+  if (!item?.NgayHetHan) return ''
+  
+  const now = Date.now()
+  const deadline = new Date(item.NgayHetHan).getTime()
+  const diff = deadline - now
+  
+  if (diff <= 0) return 'ĐÃ KẾT THÚC'
+  
+  const days = Math.floor(diff / (24 * 60 * 60 * 1000))
+  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
+  
+  if (days > 0) {
+    return `${days}d ${hours}h`
+  }
+  return `${hours}h`
 }
 
 function goCreate() {
@@ -171,6 +218,7 @@ onMounted(async () => {
                 <th>Giảng viên</th>
                 <th>Học kỳ</th>
                 <th>Sĩ số</th>
+                <th>Tiến độ</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -193,6 +241,16 @@ onMounted(async () => {
                 </td>
                 <td>{{ formatSemester(item) }}</td>
                 <td>{{ item.enrolled_count ?? 0 }} SV</td>
+                <td>
+                  <div v-if="item?.IsStarted && item?.NgayHetHan" class="progress-cell">
+                    <div class="progress-mini">
+                      <div class="progress-bar-mini" :style="{ width: getProgressPercentage(item) + '%' }"></div>
+                    </div>
+                    <span class="progress-text">{{ getProgressPercentage(item) }}% ({{ getRemainingTime(item) }})</span>
+                  </div>
+                  <span v-else-if="!item?.IsStarted" class="text-muted">Chưa bắt đầu</span>
+                  <span v-else class="text-muted">Chưa có hạn</span>
+                </td>
                 <td class="action-cell">
                   <button class="icon-btn" type="button" title="Xem" @click="viewItem(item)">
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -258,6 +316,71 @@ h1 { margin: 0; color: #007336; }
 }
 
 .stats-grid { display: grid; grid-template-columns: minmax(180px, 1fr); gap: 12px; }
+.stat-card { border: 1px solid #d8dee9; border-radius: 12px; background: #fff; padding: 12px 14px; }
+.stat-label { color: #4a5a72; font-size: 13px; }
+.stat-value { margin-top: 6px; color: #0c274f; font-size: 34px; line-height: 1; font-weight: 800; }
+.toolbar { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+input { width: 100%; box-sizing: border-box; border: 1px solid #c7d3e2; border-radius: 8px; padding: 10px 12px; font-size: 17px; }
+.btn-primary {
+  border: none; border-radius: 8px; padding: 10px 16px; font-weight: 700; cursor: pointer; background: #007336; color: #fff;
+}
+.success,.error { margin: 0; padding: 10px 12px; border-radius: 8px; }
+.success { background: #eefaf2; color: #177144; }
+.error { background: #fdeeee; color: #b72a2a; }
+.table-wrap { min-height: 0; display: flex; flex-direction: column; }
+.state { padding: 12px; border-radius: 8px; background: #f4f7fc; color: #607086; }
+.table-scroll { overflow: auto; min-height: 0; max-height: 430px; }
+.result-table { width: 100%; border-collapse: collapse; }
+.result-table th,.result-table td { border-bottom: 1px solid #e3e9f2; padding: 10px 8px; text-align: left; vertical-align: top; }
+.result-table th { background: #f0f5fc; color: #2f4565; position: sticky; top: 0; z-index: 2; }
+.class-info { display: flex; gap: 10px; align-items: center; }
+.class-badge {
+  width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(145deg, #0f8f54, #2f72ff); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0;
+}
+.class-name { font-weight: 700; }
+.class-sub { color: #607086; font-size: 12px; }
+.action-cell { white-space: nowrap; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; margin-right: 8px; border-radius: 8px; border: 1px solid #c7d3e2; background: #f8fbff; color: #007336; font-size: 0; line-height: 0; cursor: pointer;
+}
+.icon-btn svg { width: 16px; height: 16px; display: block; fill: currentColor; pointer-events: none; }
+.icon-btn:hover { background: #eaf5ee; border-color: #9ec7ae; }
+.danger-btn { color: #b72a2a; }
+.danger-btn:hover { background: #fdeeee; border-color: #e1aaaa; color: #962020; }
+.danger-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* Progress Bar */
+.progress-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.progress-mini {
+  width: 100%;
+  height: 6px;
+  background: #e3e9f2;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.progress-bar-mini {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981 0%, #059669 100%);
+  transition: width 0.3s ease;
+  border-radius: 3px;
+}
+
+.progress-text {
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
+}
+
+.text-muted {
+  color: #999;
+  font-size: 12px;
+}
 
 .stat-card {
   border: 1px solid #c7d3e2;
