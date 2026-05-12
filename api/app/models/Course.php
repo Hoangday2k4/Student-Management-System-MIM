@@ -302,13 +302,27 @@ class Course
             $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoCK REAL DEFAULT 0');
         }
         if (!isset($names['CreatedAt'])) {
-            // SQLite khong cho ADD COLUMN voi default khong hang so (CURRENT_TIMESTAMP)
             $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN CreatedAt TEXT');
             $pdo->exec("UPDATE LopHocPhan SET CreatedAt = datetime('now', 'localtime') WHERE CreatedAt IS NULL OR trim(CreatedAt) = ''");
         }
         if (!isset($names['TrangThai'])) {
             $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrangThai TEXT DEFAULT "ACTIVE"');
         }
+        
+        
+        if (!isset($names['NgayHetHan'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN NgayHetHan TEXT');
+        }
+        if (!isset($names['IsLocked'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN IsLocked INTEGER DEFAULT 0');
+        }
+        if (!isset($names['IsStarted'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN IsStarted INTEGER DEFAULT 0');
+        }
+        if (!isset($names['StartedAt'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN StartedAt TEXT');
+        }
+        // ----------------------------------
 
         // C. Cập nhật bảng ThoiKhoaBieu (Chuyen CaHoc tu INTEGER sang TEXT)
         $tkbCols = $pdo->query('PRAGMA table_info(ThoiKhoaBieu)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -349,9 +363,7 @@ class Course
             self::ensureMapForLhp($pdo, (string)$maLHP);
         }
 
-
-        // Phần điểm danh
-        // Thêm các cột phục vụ tính năng Điểm danh (Tương đương Entity Enrollment của bạn)
+        // Phần điểm danh & Điểm tổng kết
         $kqCols = $pdo->query('PRAGMA table_info(KetQuaHocTap)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $kqNames = [];
         foreach ($kqCols as $c) $kqNames[(string)$c['name']] = true;
@@ -580,7 +592,7 @@ class Course
         
         // Simplify: Lấy Khoa trực tiếp từ LopHocPhan.MaKhoa
         $stmt = $pdo->prepare(
-            'SELECT l.MaLHP, l.MaMon, l.MaGV, l.MaKhoa, l.HocKy, l.NamHoc, l.SoLuongToiDa, l.TrongSoCC, l.TrongSoGK, l.TrongSoCK, l.CreatedAt,
+            'SELECT l.MaLHP, l.MaMon, l.MaGV, l.MaKhoa, l.HocKy, l.NamHoc, l.SoLuongToiDa, l.TrongSoCC, l.TrongSoGK, l.TrongSoCK, l.CreatedAt, l.IsLocked, l.NgayHetHan, l.IsStarted, l.StartedAt,
                     m.TenMon, m.SoTinChi,
                     k.TenKhoa, g.HoTen AS teacher_name
              FROM LopHocPhan l
@@ -621,6 +633,10 @@ class Course
             'created_at' => $row['CreatedAt'] ?? '',
             'teacher_name' => $row['teacher_name'] ?? '',
             'enrolled_count' => (int)$countStmt->fetchColumn(), // Đây là số SV thực tế hiện có trong lớp
+            'IsLocked' => $row['IsLocked'] !== null ? (int)$row['IsLocked'] : 0,
+            'NgayHetHan' => $row['NgayHetHan'] ?? null,
+            'IsStarted' => $row['IsStarted'] !== null ? (int)$row['IsStarted'] : 0,
+            'StartedAt' => $row['StartedAt'] ?? null,
         ];
     }
 
@@ -715,7 +731,7 @@ class Course
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $sql = 'SELECT m.MaMon, m.TenMon, m.SoTinChi, n.TenKhoa, l.MaLHP, l.MaGV, l.MaKhoa, l.HocKy, l.NamHoc, l.SoLuongToiDa, l.CreatedAt, g.HoTen AS teacher_name
+        $sql = 'SELECT m.MaMon, m.TenMon, m.SoTinChi, n.TenKhoa, l.MaLHP, l.MaGV, l.MaKhoa, l.HocKy, l.NamHoc, l.SoLuongToiDa, l.CreatedAt, g.HoTen AS teacher_name, l.IsLocked, l.NgayHetHan, l.IsStarted, l.StartedAt
                 FROM LopHocPhan l
                 INNER JOIN MonHoc m ON m.MaMon = l.MaMon
                 LEFT JOIN Khoa n ON n.MaKhoa = l.MaKhoa
@@ -765,6 +781,10 @@ class Course
                 'created_at' => $row['CreatedAt'] ?? '',
                 'teacher_name' => $row['teacher_name'] ?? '',
                 'enrolled_count' => (int)$cst->fetchColumn(),
+                'IsLocked' => $row['IsLocked'] !== null ? (int)$row['IsLocked'] : 0,
+                'NgayHetHan' => $row['NgayHetHan'] ?? null,
+                'IsStarted' => $row['IsStarted'] !== null ? (int)$row['IsStarted'] : 0,
+                'StartedAt' => $row['StartedAt'] ?? null,
             ];
         }
         return $out;
@@ -1136,20 +1156,33 @@ class Course
     // Phần điểm danh
     public static function createNewLessonWithPdo(PDO $pdo, string $maLHP): int
     {
-        // Nối thêm số '0' vào cuối chuỗi lịch sử điểm danh của tất cả SV trong lớp
+        // 1. Nối thêm số '0' vào cuối chuỗi lịch sử điểm danh của tất cả SV trong lớp
         $stmt = $pdo->prepare("UPDATE KetQuaHocTap SET LichSuDiemDanh = IFNULL(LichSuDiemDanh, '') || '0' WHERE MaLHP = :ma_lhp");
         $stmt->execute([':ma_lhp' => $maLHP]);
 
-        // Cập nhật trạng thái lớp thành ACTIVE (Đang diễn ra) nếu chưa cập nhật
+        // 2. Cập nhật trạng thái lớp thành ACTIVE (Đang diễn ra) nếu chưa cập nhật
         $upLhp = $pdo->prepare("UPDATE LopHocPhan SET TrangThai = 'ACTIVE' WHERE MaLHP = :ma_lhp AND (TrangThai IS NULL OR TrangThai = 'PENDING')");
         $upLhp->execute([':ma_lhp' => $maLHP]);
 
-        // Lấy số thứ tự buổi học vừa tạo
+        // 3. Lấy số thứ tự buổi học vừa tạo
         $check = $pdo->prepare("SELECT length(LichSuDiemDanh) FROM KetQuaHocTap WHERE MaLHP = :ma_lhp LIMIT 1");
         $check->execute([':ma_lhp' => $maLHP]);
-        return (int)$check->fetchColumn();
-    }
+        $lessonNum = (int)$check->fetchColumn();
 
+        // 4. KIỂM TRA & ĐẶT HẠN CHÓT (Nếu đây là buổi học ĐẦU TIÊN)
+        // if ($lessonNum === 1) {
+        //     // Tính toán thời điểm hiện tại cộng thêm 4 tháng
+        //     $expiryDate = date('Y-m-d H:i:s', strtotime('+4 months'));
+            
+        //     $setExpiry = $pdo->prepare("UPDATE LopHocPhan SET NgayHetHan = :expiry WHERE MaLHP = :ma_lhp");
+        //     $setExpiry->execute([
+        //         ':expiry' => $expiryDate,
+        //         ':ma_lhp' => $maLHP
+        //     ]);
+        // }
+
+        return $lessonNum;
+    }
     //Phần điểm danh
     public static function updateAttendanceWithPdo(PDO $pdo, string $maLHP, string $maSV, int $weekNumber, bool $isAbsent): void
     {
