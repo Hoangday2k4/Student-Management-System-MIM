@@ -37,6 +37,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $controller->submitScore();
     } elseif ($action === 'update-weights') {
         $controller->updateWeights();
+    } elseif ($action === 'toggle-lock') {
+        $controller->toggleLock();
     } else {
         $controller->update();
     }
