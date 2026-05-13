@@ -1385,6 +1385,20 @@ class CourseController
 
            
 
+            $courseCodeToCheck = strtoupper(trim((string)($data['course_code'] ?? '')));
+            if ($courseCodeToCheck !== '') {
+                $dupCheck = $pdo->prepare('SELECT 1 FROM LopHocPhan WHERE upper(MaMon) = :mc LIMIT 1');
+                $dupCheck->execute([':mc' => $courseCodeToCheck]);
+                if ($dupCheck->fetchColumn()) {
+                    jsonResponse([
+                        'status' => 'error',
+                        'message' => 'Mã môn học đã được dùng trong một lớp học phần. Mỗi môn học chỉ có một lớp học phần tại một thời điểm.',
+                        'fields' => ['course_code' => 'Mã môn học đã tồn tại trong hệ thống.'],
+                    ], 409);
+                    return;
+                }
+            }
+
             $roomConflict = $this->findClassroomConflict($pdo, (string)($data['schedule'] ?? ''), (string)($data['classroom'] ?? ''), null);
             if ($roomConflict) {
                 $msg = sprintf(

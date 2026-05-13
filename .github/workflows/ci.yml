@@ -92,13 +92,13 @@ jobs:
         with:
           php-version: "8.2"
           extensions: pdo_sqlite, sqlite3
-      - name: Install FE dependencies
-        run: pnpm -C fe install --frozen-lockfile
       - name: Cache Cypress binary
         uses: actions/cache@v4
         with:
           path: ~/.cache/Cypress
           key: cypress-${{ runner.os }}-${{ hashFiles('fe/pnpm-lock.yaml') }}
+      - name: Install FE dependencies
+        run: pnpm -C fe install --frozen-lockfile
       - name: Verify Cypress binary
         run: pnpm -C fe exec cypress verify
       - name: E2E (Cypress/Selenium if configured)

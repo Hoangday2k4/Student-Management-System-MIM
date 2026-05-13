@@ -516,7 +516,7 @@ class Faculty
 
         $majorCount  = self::countRefs($pdo, 'Nganh', 'MaKhoa', $code);
         $classCount  = self::countRefs($pdo, 'LopSinhHoat', 'MaNganh', $code);
-        $teacherCount = self::countRefs($pdo, 'GiangVien', 'MaNganh', $code);
+        $teacherCount = self::countRefs($pdo, 'GiangVien', 'MaKhoa', $code);
         $courseCount = self::countRefs($pdo, 'MonHoc', 'MaNganh', $code);
         if ($majorCount > 0 || $classCount > 0 || $teacherCount > 0 || $courseCount > 0) {
             throw new RuntimeException('Không thể xóa khoa vì vẫn còn ngành, lớp, giáo viên hoặc môn học đang liên kết.');
