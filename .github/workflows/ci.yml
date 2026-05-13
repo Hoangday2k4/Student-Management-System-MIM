@@ -14,6 +14,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
+          extensions: pdo_sqlite, sqlite3
       - name: Composer install (if configured)
         shell: bash
         run: |
@@ -56,6 +57,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
+          extensions: pdo_sqlite, sqlite3
       - name: Composer install (if configured)
         shell: bash
         run: |
@@ -89,9 +91,20 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
+          extensions: pdo_sqlite, sqlite3
+      - name: Install FE dependencies
+        run: pnpm -C fe install --frozen-lockfile
+      - name: Cache Cypress binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('fe/pnpm-lock.yaml') }}
+      - name: Verify Cypress binary
+        run: pnpm -C fe exec cypress verify
       - name: E2E (Cypress/Selenium if configured)
         shell: bash
         env:
+          CI: "1"
           CI_TEST_MODE: "1"
         run: |
           if [ ! -f fe/package.json ]; then
@@ -99,16 +112,31 @@ jobs:
             exit 0
           fi
 
-          TMP_E2E=$(mktemp -d)
-          mkdir -p "$TMP_E2E/sessions"
-          DB_PATH_OVERRIDE="$TMP_E2E/e2e.sqlite" \
-            php -d session.save_path="$TMP_E2E/sessions" \
-            -S 127.0.0.1:8001 -t api > /tmp/php-e2e-server.log 2>&1 &
-
-          pnpm -C fe install --frozen-lockfile
+          # Start Vite dev server (Cypress mocks all API calls via cy.intercept())
           pnpm -C fe run dev -- --host 0.0.0.0 --port 5173 &
-          # Cypress tests mock all API calls via cy.intercept(); only Vite needs to be ready.
-          npx wait-on http://localhost:5173 --timeout 120000
+          VITE_PID=$!
+
+          # Wait for Vite to be ready (up to 120s)
+          VITE_READY=0
+          for i in {1..60}; do
+            if curl -sf http://localhost:5173 >/dev/null 2>&1; then
+              echo "Vite dev server ready after $((i*2))s"
+              VITE_READY=1
+              break
+            fi
+            if ! kill -0 $VITE_PID 2>/dev/null; then
+              echo "ERROR: Vite dev server died" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          if [[ $VITE_READY -eq 0 ]]; then
+            echo "ERROR: Vite dev server did not respond after 120s" >&2
+            kill $VITE_PID 2>/dev/null || true
+            exit 1
+          fi
+
           pnpm -C fe run test:e2e
 
   api-tests:
@@ -119,6 +147,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
+          extensions: pdo_sqlite, sqlite3
       - name: Composer install (if configured)
         shell: bash
         run: |
@@ -208,6 +237,7 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
+          extensions: pdo_sqlite, sqlite3
       - name: Composer install (if configured)
         shell: bash
         run: |
