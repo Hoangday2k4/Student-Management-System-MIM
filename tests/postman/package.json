@@ -1,0 +1,17 @@
+{
+  "name": "student-management-postman-tests",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "newman run collections/student-management-api.postman_collection.json -e env.postman_environment.json --reporters cli,htmlextra,junitfull --reporter-htmlextra-export reports/report.html --reporter-junitfull-export reports/junit.xml --timeout-request 10000",
+    "rate-test": "node helpers/rate_limit.js",
+    "cleanup": "node helpers/cleanup.js"
+  },
+  "devDependencies": {
+    "newman": "^6.0.0",
+    "newman-reporter-htmlextra": "^1.21.0",
+    "newman-reporter-junitfull": "^1.1.0"
+    ,"node-fetch": "^2.6.7",
+    "minimist": "^1.2.8"
+  }
+}

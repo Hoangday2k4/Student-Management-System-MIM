@@ -340,19 +340,38 @@ async function handleLogout() {
 
 .content {
   padding: 14px;
-  overflow: hidden;
+  overflow: auto;
   min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #888 #f1f1f1;
+}
+
+.content::-webkit-scrollbar {
+  width: 10px;
+}
+
+.content::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.content::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 5px;
+}
+
+.content::-webkit-scrollbar-thumb:hover {
+  background: #555;
 }
 
 .content :deep(.page) {
   height: 100%;
-  overflow: hidden;
+  overflow: auto;
 }
 
 .content :deep(.page > .card) {
   height: 100%;
   min-height: 0;
-  overflow: hidden;
+  overflow: auto;
   display: flex;
   flex-direction: column;
   margin-left: auto;

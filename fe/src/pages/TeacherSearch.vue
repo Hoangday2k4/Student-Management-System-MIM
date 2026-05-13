@@ -16,6 +16,8 @@ const modalLoading = ref(false)
 const modalError = ref('')
 const modalMode = ref('view')
 const currentTeacherCode = ref('')
+const loadingFaculties = ref(false)
+const facultyOptions = ref([])
 
 const filters = reactive({
   keyword: '',
@@ -27,8 +29,8 @@ const editForm = reactive({
   date_of_birth: '',
   gender: 'Nam',
   academic_title: '',
-  department: '',
-  homeroom_class: '',
+  department: '', // Dành cho Dropdown (Lưu Mã)
+  department_name: '', // THÊM DÒNG NÀY: Dành cho màn hình Xem (Lưu Tên lấy từ DB)
   email: '',
   phone: '',
   status: 'Đang công tác',
@@ -94,6 +96,23 @@ async function loadIdentity() {
   }
 }
 
+async function loadFaculties() {
+  loadingFaculties.value = true
+  try {
+    const res = await fetch('/api/faculties')
+    const payload = await res.json().catch(() => ({}))
+    if (res.ok && payload.status === 'success' && Array.isArray(payload.data)) {
+      facultyOptions.value = payload.data
+    } else {
+      facultyOptions.value = []
+    }
+  } catch (error) {
+    facultyOptions.value = []
+  } finally {
+    loadingFaculties.value = false
+  }
+}
+
 function buildQuery() {
   const params = new URLSearchParams()
   if (filters.keyword.trim()) params.append('keyword', filters.keyword.trim())
@@ -129,8 +148,8 @@ function fillEditForm(teacher) {
   editForm.date_of_birth = String(teacher?.date_of_birth || '')
   editForm.gender = String(teacher?.gender || 'Nam') || 'Nam'
   editForm.academic_title = String(teacher?.academic_title || '')
-  editForm.department = String(teacher?.department || '')
-  editForm.homeroom_class = String(teacher?.homeroom_class || '')
+ editForm.department = String(teacher?.department_code || '') // Vẫn giữ để Dropdown hoạt động
+  editForm.department_name = String(teacher?.department || '') // Hứng cái tên từ DB
   editForm.email = String(teacher?.email || '')
   editForm.phone = String(teacher?.phone || '')
   editForm.status = String(teacher?.status || 'Đang công tác') || 'Đang công tác'
@@ -160,7 +179,7 @@ async function openView(teacher) {
   modalMode.value = 'view'
   currentTeacherCode.value = String(teacher?.teacher_code || '')
   modalOpen.value = true
-  await fetchTeacherDetail(currentTeacherCode.value)
+  await Promise.all([loadFaculties(), fetchTeacherDetail(currentTeacherCode.value)])
 }
 
 async function openEdit(teacher) {
@@ -187,7 +206,6 @@ async function saveEdit() {
       gender: editForm.gender,
       academic_title: editForm.academic_title.trim(),
       department: editForm.department.trim(),
-      homeroom_class: editForm.homeroom_class.trim(),
       email: editForm.email.trim(),
       phone: editForm.phone.trim(),
       status: editForm.status,
@@ -234,7 +252,7 @@ async function deleteTeacher(teacher) {
 
 onMounted(async () => {
   await loadIdentity()
-  await doSearch()
+  await Promise.all([loadFaculties(), doSearch()])
 })
 </script>
 
@@ -359,8 +377,8 @@ onMounted(async () => {
             <div><b>Ngày sinh:</b> {{ editForm.date_of_birth || '-' }}</div>
             <div><b>Giới tính:</b> {{ genderLabel(editForm.gender) }}</div>
             <div><b>Học hàm/Học vị:</b> {{ editForm.academic_title || '-' }}</div>
-            <div><b>Khoa/Bộ môn:</b> {{ editForm.department || '-' }}</div>
-            <div><b>Lớp phụ trách:</b> {{ editForm.homeroom_class || '-' }}</div>
+         <div><b>Khoa:</b> {{ editForm.department_name || '-' }}</div>
+
             <div><b>Email:</b> {{ editForm.email || '-' }}</div>
             <div><b>Số điện thoại:</b> {{ editForm.phone || '-' }}</div>
             <div><b>Trạng thái:</b> {{ statusLabel(editForm.status) }}</div>
@@ -391,10 +409,12 @@ onMounted(async () => {
             <input v-model="editForm.academic_title" type="text" placeholder="Ví dụ: ThS, TS, PGS..." />
 
             <label>Khoa (mã ngành) *</label>
-            <input v-model="editForm.department" type="text" placeholder="Ví dụ: TCTIN" />
-
-            <label>Lớp phụ trách</label>
-            <input v-model="editForm.homeroom_class" type="text" placeholder="Để trống nếu không chủ nhiệm lớp nào" />
+            <select v-model="editForm.department" :disabled="loadingFaculties">
+              <option value="" disabled>{{ loadingFaculties ? 'Đang tải mã khoa...' : 'Chọn mã khoa' }}</option>
+              <option v-for="faculty in facultyOptions" :key="faculty.code" :value="faculty.code">
+                {{ faculty.code }} - {{ faculty.name }}
+              </option>
+            </select>
 
             <label>Trạng thái</label>
             <select v-model="editForm.status">

@@ -1,0 +1,16 @@
+[
+  {
+    "student_code": "S001",
+    "full_name": "Test Student",
+    "cccd": "012345678901",
+    "date_of_birth": "2004-01-01",
+    "gender": "Nam",
+    "address": "Ha Noi",
+    "admission_date": "2022-09-01",
+    "class_name": "CTK42",
+    "email": "s001@example.test",
+    "phone": "0900000001",
+    "status": "Đang học",
+    "department_name": "CNTT"
+  }
+]

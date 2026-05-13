@@ -1,7 +1,6 @@
-﻿<script setup>
-import { computed, reactive, ref } from 'vue'
+<script setup>
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { FACULTY_OPTIONS } from '@/constants/options'
 
 const route = useRoute()
 const router = useRouter()
@@ -9,9 +8,11 @@ const SEMESTER_OPTIONS = ['Kì I', 'Kì II', 'Kì hè']
 
 const step = ref('input')
 const loading = ref(true)
+const loadingMeta = ref(false)
 const submitting = ref(false)
 const serverError = ref('')
 const saveResult = ref(null)
+const departments = ref([])
 
 const form = reactive({
   id: 0,
@@ -32,6 +33,7 @@ const fileName = ref('')
 const studentFile = ref(null)
 const importPreviewRows = ref([])
 const importPreviewError = ref('')
+const importPreviewLoading = ref(false) // THÊM DÒNG NÀY
 
 const errors = reactive({
   course_code: '',
@@ -244,7 +246,7 @@ function getHeaderIndexMap(headers) {
 async function buildImportPreview(file) {
   const ext = file.name.toLowerCase().split('.').pop() || ''
   if (ext === 'xlsx' || ext === 'xls') {
-    importPreviewError.value = 'Preview chi ho tro file CSV. File Excel van duoc gui len he thong khi luu.'
+    importPreviewError.value = 'Preview chỉ hỗ trợ file CSV. File Excel vẫn được gửi lên hệ thống khi lưu.'
     return
   }
   const text = await file.text()
@@ -253,16 +255,16 @@ async function buildImportPreview(file) {
     .split(/\r?\n/)
     .filter((line) => line.trim() !== '')
   if (lines.length < 2) {
-    importPreviewError.value = 'File khong co du lieu de preview.'
+    importPreviewError.value = 'File không có dữ liệu để preview.'
     return
   }
 
   const header = parseCsvLine(lines[0])
   const map = getHeaderIndexMap(header)
-  const required = ['student_code', 'full_name', 'date_of_birth', 'gender', 'class_name']
+  const required = ['student_code']
   const missing = required.filter((key) => map[key] === undefined)
   if (missing.length > 0) {
-    importPreviewError.value = 'File thieu cot de preview: MSSV, Ho ten, Ngay sinh, Gioi tinh, Lop.'
+    importPreviewError.value = 'File bắt buộc phải có cột MSSV.'
     return
   }
 
@@ -275,21 +277,72 @@ async function buildImportPreview(file) {
     const dateOfBirth = String(cols[map.date_of_birth] || '').trim()
     const gender = String(cols[map.gender] || '').trim()
     const className = String(cols[map.class_name] || '').trim()
+    
     if (!studentCode && !fullName && !dateOfBirth && !gender && !className) {
       continue
     }
+    
     const key = studentCode.toLowerCase()
     if (!studentCode || seen.has(key)) continue
     seen.add(key)
+    
+    // Đẩy dữ liệu thô vào mảng
     rows.push({
       student_code: studentCode,
       full_name: fullName,
       date_of_birth: dateOfBirth,
-      gender,
+      gender: gender,
       class_name: className,
+      major: '', // <-- ĐÃ THÊM: Khởi tạo cột Ngành rỗng
+      validity_status: '', // <-- THÊM: Tính trạng (Hợp lệ / Không tồn tại)
     })
   }
+  
+  // Gán mảng vào Proxy để Vue bắt đầu theo dõi
   importPreviewRows.value = rows
+
+  // BẮT ĐẦU CHỌC DB ĐỂ LẤY THÔNG TIN VÀ KIỂM TRA TÍNH TRẠNG
+  if (rows.length > 0) {
+    importPreviewLoading.value = true
+    try {
+      const reactiveRows = importPreviewRows.value
+      
+      for (const row of reactiveRows) {
+        try {
+          // Mặc định là đang kiểm tra
+          row.validity_status = 'checking'
+          
+          const res = await fetch(`/api/students?keyword=${encodeURIComponent(row.student_code)}`)
+          if (res.ok) {
+            const data = await res.json()
+            const dbStudent = (Array.isArray(data) ? data : []).find(
+              (s) => String(s.student_code).toLowerCase() === String(row.student_code).toLowerCase()
+            )
+            
+            if (dbStudent) {
+              row.full_name = dbStudent.full_name || row.full_name
+              row.date_of_birth = dbStudent.date_of_birth || row.date_of_birth
+              row.gender = dbStudent.gender || row.gender
+              row.class_name = dbStudent.class_name || row.class_name
+              row.major = dbStudent.major || '-'
+              row.validity_status = 'valid' // Sinh viên tồn tại
+            } else {
+              row.full_name = row.full_name || '(Không có trong hệ thống)'
+              row.major = '-'
+              row.validity_status = 'not_found' // Sinh viên không tồn tại
+            }
+          } else {
+            row.validity_status = 'error' // Lỗi khi fetch
+          }
+        } catch (err) {
+          console.error('Lỗi khi fetch sinh viên:', row.student_code, err)
+          row.validity_status = 'error'
+        }
+      }
+    } finally {
+      importPreviewLoading.value = false
+    }
+  }
 }
 
 function goConfirm() {
@@ -323,6 +376,25 @@ async function loadDetail() {
       return
     }
 
+    // Load faculties for dropdown
+    loadingMeta.value = true
+    try {
+      const deptRes = await fetch('/api/faculties')
+      const deptData = await deptRes.json().catch(() => ({}))
+      if (deptRes.ok && Array.isArray(deptData.data)) {
+        departments.value = deptData.data.map((row) => ({
+          code: String(row.code || '').trim(),
+          name: String(row.name || '').trim(),
+        }))
+      } else {
+        departments.value = []
+      }
+    } catch (err) {
+      // Fallback: empty departments array
+      departments.value = []
+    }
+    loadingMeta.value = false
+
     const id = Number(route.query.id || 0)
     if (!id) {
       serverError.value = 'Thiếu mã môn học.'
@@ -345,7 +417,17 @@ async function loadDetail() {
     form.teacher_code = data.teacher_code || ''
     form.semester = normalizeSemester(data.semester_label ?? data.semester ?? '')
     form.academic_year = data.academic_year || ''
-    form.department = data.department || ''
+    // Set department - match by code first, then by name
+    const deptValue = data.department || ''
+    let matchingDept = departments.value.find(
+      (d) => String(d.code || '').trim().toLowerCase() === String(deptValue || '').trim().toLowerCase()
+    )
+    if (!matchingDept) {
+      matchingDept = departments.value.find(
+        (d) => String(d.name || '').trim().toLowerCase() === String(deptValue || '').trim().toLowerCase()
+      )
+    }
+    form.department = matchingDept ? matchingDept.code : deptValue
     form.schedule = data.schedule || ''
     form.classroom = data.classroom || ''
     form.max_students = data.max_students ?? ''
@@ -355,7 +437,8 @@ async function loadDetail() {
     loading.value = false
   }
 }
-loadDetail()
+
+onMounted(loadDetail)
 
 async function submitForm() {
   submitting.value = true
@@ -439,7 +522,7 @@ async function submitForm() {
 <template>
   <div class="page">
     <div class="card">
-      <h1>Cập nhật môn học</h1>
+      <h1>Cập nhật lớp học phần</h1>
       <p v-if="loading" class="state">Đang tải dữ liệu...</p>
       <p v-else-if="serverError && step === 'input'" class="state error">{{ serverError }}</p>
 
@@ -489,11 +572,11 @@ async function submitForm() {
           </div>
         </div>
 
-        <label>Khoa/Bộ môn</label>
+        <label>Khoa</label>
         <div>
-          <select v-model="form.department">
-            <option value="">-- Chọn khoa/bộ môn --</option>
-            <option v-for="department in FACULTY_OPTIONS" :key="department" :value="department">{{ department }}</option>
+          <select v-model="form.department" :disabled="loadingMeta">
+            <option value="">{{ loadingMeta ? 'Đang tải khoa...' : '-- Chọn khoa --' }}</option>
+            <option v-for="dept in departments" :key="dept.code" :value="dept.code">{{ dept.code }} - {{ dept.name }}</option>
           </select>
         </div>
 
@@ -521,7 +604,7 @@ async function submitForm() {
           <p v-if="fileName">File đã chọn: <b>{{ fileName }}</b></p>
           <p class="hint">
             Cột mặc định file import:
-            <b>MSSV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Lớp</b>.
+            <b>MSSV</b>
           </p>
         </div>
 
@@ -542,7 +625,7 @@ async function submitForm() {
           <span class="label">Học kỳ</span><span>{{ form.semester || '-' }}</span>
           <span class="label">Năm học</span><span>{{ form.academic_year || '-' }}</span>
           <span class="label">Mã giáo viên</span><span>{{ form.teacher_code }}</span>
-          <span class="label">Khoa/Bộ môn</span><span>{{ form.department || '-' }}</span>
+          <span class="label">Khoa</span><span>{{ form.department || '-' }}</span>
           <span class="label">Lịch học</span><span>{{ form.schedule || '-' }}</span>
           <span class="label">Phòng học</span><span>{{ form.classroom || '-' }}</span>
           <span class="label">Số lượng tối đa</span><span>{{ form.max_students || '-' }}</span>
@@ -560,6 +643,8 @@ async function submitForm() {
                   <th>Ngày sinh</th>
                   <th>Giới tính</th>
                   <th>Lớp</th>
+                  <th>Ngành</th>
+                  <th>Tính trạng</th>
                 </tr>
               </thead>
               <tbody>
@@ -569,6 +654,21 @@ async function submitForm() {
                   <td>{{ row.date_of_birth }}</td>
                   <td>{{ row.gender }}</td>
                   <td>{{ row.class_name }}</td>
+                  <td>{{ row.major }}</td>
+                  <td>
+                    <div v-if="row.validity_status === 'checking'" class="status-badge checking">
+                      <span class="spinner-mini"></span> Đang kiểm tra...
+                    </div>
+                    <div v-else-if="row.validity_status === 'valid'" class="status-badge valid">
+                      ✓ Hợp lệ
+                    </div>
+                    <div v-else-if="row.validity_status === 'not_found'" class="status-badge invalid">
+                      ✗ Không tồn tại
+                    </div>
+                    <div v-else class="status-badge error">
+                      ⚠ Lỗi kiểm tra
+                    </div>
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -670,6 +770,57 @@ input, select { width: 100%; box-sizing: border-box; border: 1px solid #c7d3e2; 
 .hint-line {
   color: #33435c;
 }
+
+/* Student Validation Status */
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.status-badge.valid {
+  background: #d1f2e5;
+  color: #0d7a4b;
+  border: 1px solid #a8e6d4;
+}
+
+.status-badge.invalid {
+  background: #fde2e2;
+  color: #a92a2a;
+  border: 1px solid #f5b3b3;
+}
+
+.status-badge.error {
+  background: #fff3cd;
+  color: #856404;
+  border: 1px solid #ffeaa7;
+}
+
+.status-badge.checking {
+  background: #e7f1f8;
+  color: #0b5394;
+  border: 1px solid #cfe2f3;
+}
+
+.spinner-mini {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 900px) {
   .grid { grid-template-columns: 1fr; }
   .inline-row,

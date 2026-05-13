@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 require_once __DIR__ . '/../models/Teacher.php';
 require_once __DIR__ . '/../models/Admin.php';
 require_once __DIR__ . '/../helpers/response.php';
@@ -165,7 +165,6 @@ class TeacherController
         $errors = [];
         if ($teacherCode === '') $errors['teacher_code'] = 'Hay nhap ma giao vien.';
         if ($fullName === '') $errors['full_name'] = 'Hay nhap ho ten.';
-        if ($department === '') $errors['department'] = 'Hay nhap khoa/bo mon.';
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Email khong hop le.';
         if ($gender === '') $errors['gender'] = 'Gioi tinh khong hop le.';
         if ($status === '') $errors['status'] = 'Trang thai khong hop le.';
@@ -189,7 +188,7 @@ class TeacherController
                 'gender' => $gender,
                 'academic_title' => trim((string)($payload['academic_title'] ?? '')),
                 'department' => $department,
-                'homeroom_class' => trim((string)($payload['homeroom_class'] ?? '')),
+               
                 'email' => $email,
                 'phone' => trim((string)($payload['phone'] ?? '')),
                 'avatar' => '',
@@ -253,17 +252,25 @@ class TeacherController
 
     private function parseCsvRows(string $filePath): array
     {
+        $content = file_get_contents($filePath);
+        if ($content === false) return [];
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content);
+        $content = str_replace(["\r\n", "\r"], "\n", $content);
+        $lines = explode("\n", $content);
         $rows = [];
-        $handle = fopen($filePath, 'rb');
-        if (!$handle) return $rows;
-        while (($data = fgetcsv($handle)) !== false) {
-            $row = [];
-            foreach ($data as $cell) {
-                $row[] = trim((string)$cell);
-            }
-            $rows[] = $row;
+        if (empty($lines)) return $rows;
+        $firstLine = $lines[0];
+        $delimiter = ',';
+        if (substr_count($firstLine, ';') > substr_count($firstLine, ',')) {
+            $delimiter = ';';
+        } elseif (substr_count($firstLine, "\t") > substr_count($firstLine, ',')) {
+            $delimiter = "\t";
         }
-        fclose($handle);
+        foreach ($lines as $line) {
+            if (trim($line) === '') continue;
+            $row = str_getcsv($line, $delimiter, '"', '');
+            $rows[] = array_map('trim', $row);
+        }
         return $rows;
     }
 
@@ -393,15 +400,15 @@ class TeacherController
         $headers = $rawRows[0];
         $headerMap = [];
         $headerAlias = [
-            'teacher_code' => ['msgv', 'magiaovien', 'mgv', 'teachercode'],
+            'teacher_code' => ['msgv', 'magiaovien', 'magiangvien', 'mgv', 'teachercode'],
             'full_name' => ['hoten', 'hten', 'fullname', 'tengiaovien'],
             'date_of_birth' => ['ngaysinh', 'dateofbirth', 'dob'],
             'gender' => ['gioitinh', 'gender'],
             'email' => ['email'],
             'phone' => ['sodienthoai', 'sdt', 'phone'],
             'academic_title' => ['hocham', 'hochamhocvi', 'academictitle'],
-            'department' => ['khoa', 'manganh', 'department', 'departmentcode', 'vien', 'khoavien', 'bomon', 'khoabomon'],
-            'homeroom_class' => ['lopphutrach', 'lopchunhiem', 'homeroomclass'],
+            'department' => ['khoa', 'makhoa', 'makhoa', 'department', 'departmentcode', 'vien', 'khoavien', 'bomon', 'khoabomon'],
+        
             'status' => ['trangthai', 'status'],
         ];
 
@@ -426,7 +433,7 @@ class TeacherController
                 'phone' => 5,
                 'academic_title' => 6,
                 'department' => 7,
-                'homeroom_class' => 8,
+            
                 'status' => 9,
             ];
             foreach ($defaultMap as $field => $position) {
@@ -442,11 +449,11 @@ class TeacherController
                 $fieldLabel = [
                     'teacher_code' => 'MSGV',
                     'full_name' => 'Họ tên',
-                    'department' => 'Khoa (mã ngành)',
+                    'department' => 'Khoa (mã khoa)',
                 ][$requiredField] ?? $requiredField;
                 throw new RuntimeException(
                     'File thiếu cột bắt buộc: ' . $fieldLabel .
-                    '. Cột mặc định file import: MSGV, Họ tên, Ngày sinh, Giới tính, Email, SĐT, Học hàm, Khoa (mã ngành), Lớp phụ trách, Trạng thái.'
+                    '. Cột mặc định file import: MSGV, Họ tên, Ngày sinh, Giới tính, Email, SĐT, Học hàm, Khoa, Trạng thái.'
                 );
             }
         }
@@ -467,7 +474,7 @@ class TeacherController
                 'phone' => trim((string)($source[$headerMap['phone'] ?? -1] ?? '')),
                 'academic_title' => trim((string)($source[$headerMap['academic_title'] ?? -1] ?? '')),
                 'department' => trim((string)($source[$headerMap['department']] ?? '')),
-                'homeroom_class' => trim((string)($source[$headerMap['homeroom_class'] ?? -1] ?? '')),
+            
                 'status' => trim((string)($source[$headerMap['status'] ?? -1] ?? 'Đang công tác')),
             ];
 
@@ -505,7 +512,7 @@ class TeacherController
             'phone' => trim((string)($row['phone'] ?? '')),
             'academic_title' => trim((string)($row['academic_title'] ?? '')),
             'department' => trim((string)($row['department'] ?? '')),
-            'homeroom_class' => trim((string)($row['homeroom_class'] ?? '')),
+      
             'status' => $status,
         ];
     }
@@ -613,7 +620,8 @@ class TeacherController
                     'gender' => $row['gender'],
                     'academic_title' => $row['academic_title'],
                     'department' => $row['department'],
-                    'homeroom_class' => $row['homeroom_class'],
+                  
+            
                     'email' => $row['email'],
                     'phone' => $row['phone'],
                     'avatar' => '',
@@ -746,27 +754,40 @@ class TeacherController
             $avatar = '/api/web/image/teacher_avatar/' . $filename;
         }
 
-        $ok = Teacher::updateProfileByTeacherCode($loginId, [
-            'full_name' => $fullName,
-            'date_of_birth' => trim((string)($payload['date_of_birth'] ?? ($current['date_of_birth'] ?? ''))),
-            'gender' => $gender,
-            'academic_title' => trim((string)($payload['academic_title'] ?? ($current['academic_title'] ?? ''))),
-            'department' => $department,
-            'homeroom_class' => trim((string)($payload['homeroom_class'] ?? ($current['homeroom_class'] ?? ''))),
-            'email' => $email,
-            'phone' => trim((string)($payload['phone'] ?? ($current['phone'] ?? ''))),
-            'avatar' => $avatar,
-            'status' => $status,
-        ]);
+        // FIX KIẾN TRÚC: Đưa vào Transaction để cập nhật đồng thời Teacher và Account
+        try {
+            $pdo = get_db_connection();
+            $pdo->beginTransaction();
 
-        if (!$ok) {
-            jsonResponse(['status' => 'error', 'message' => 'Khong the cap nhat ho so.'], 500);
-            return;
+            $ok = Teacher::updateProfileWithPdo($pdo, $loginId, [
+                'full_name' => $fullName,
+                'date_of_birth' => trim((string)($payload['date_of_birth'] ?? ($current['date_of_birth'] ?? ''))),
+                'gender' => $gender,
+                'academic_title' => trim((string)($payload['academic_title'] ?? ($current['academic_title'] ?? ''))),
+                'department' => $department,
+             
+                'email' => $email,
+                'phone' => trim((string)($payload['phone'] ?? ($current['phone'] ?? ''))),
+                'avatar' => $avatar,
+                'status' => $status,
+            ]);
+
+            if (!$ok) {
+                throw new Exception('Khong the cap nhat bang GiangVien.');
+            }
+
+            $stmt = $pdo->prepare('UPDATE TaiKhoan SET HoTen = :name WHERE lower(LoginId)=lower(:login_id)');
+            $stmt->execute([':name' => $fullName, ':login_id' => $loginId]);
+
+            $pdo->commit();
+            
+            $teacher = Teacher::findByTeacherCode($loginId);
+            jsonResponse(['status' => 'success', 'data' => $this->formatTeacherForResponse($teacher)]);
+            
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => 'Khong the cap nhat ho so.', 'detail' => $e->getMessage()], 500);
         }
-
-        Admin::updateNameByLoginId($loginId, $fullName);
-        $teacher = Teacher::findByTeacherCode($loginId);
-        jsonResponse(['status' => 'success', 'data' => $this->formatTeacherForResponse($teacher)]);
     }
 
     public function adminDetail()
@@ -787,7 +808,7 @@ class TeacherController
         }
         $teacher = Teacher::findByTeacherCode($teacherCode);
         if (!$teacher) {
-            jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy giáo viên.'], 404);
+            jsonResponse(['status' => 'error', 'message' => 'Giao vien khong ton tai.'], 404);
             return;
         }
         jsonResponse(['status' => 'success', 'data' => $this->formatTeacherForResponse($teacher)]);
@@ -820,14 +841,14 @@ class TeacherController
         $status = $this->normalizeStatus((string)($payload['status'] ?? ''));
         $dateOfBirth = trim((string)($payload['date_of_birth'] ?? ''));
         $academicTitle = trim((string)($payload['academic_title'] ?? ''));
-        $homeroomClass = trim((string)($payload['homeroom_class'] ?? ''));
+       
         $phone = trim((string)($payload['phone'] ?? ''));
 
         $errors = [];
         if ($oldCode === '') $errors['old_teacher_code'] = 'Thiếu mã giáo viên gốc.';
         if ($newCode === '') $errors['teacher_code'] = 'Hãy nhập mã giáo viên.';
         if ($fullName === '') $errors['full_name'] = 'Hãy nhập họ tên.';
-        if ($department === '') $errors['department'] = 'Hãy nhập khoa/bộ môn.';
+        if ($department === '') $errors['department'] = 'Hãy nhập khoa.';
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Email không hợp lệ.';
         if ($gender === '') $errors['gender'] = 'Giới tính không hợp lệ.';
         if ($status === '') $errors['status'] = 'Trạng thái không hợp lệ.';
@@ -840,10 +861,24 @@ class TeacherController
             $pdo = get_db_connection();
             Teacher::ensureSchema($pdo);
             Admin::ensureSchema($pdo);
+            
+            // FIX KIẾN TRÚC: Check tìm Khoa cả mã lẫn tên, gắn vào biến MaKhoa
+            $maKhoa = null;
+            if ($department !== '') {
+                $stmt = $pdo->prepare('SELECT MaKhoa FROM Khoa WHERE lower(MaKhoa) = lower(:dept) OR lower(TenKhoa) = lower(:dept) LIMIT 1');
+                $stmt->execute([':dept' => $department]);
+                $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($row) {
+                    $maKhoa = $row['MaKhoa'];
+                } else {
+                    $maKhoa = $department; 
+                }
+            }
+            
             $stmt = $pdo->prepare('SELECT * FROM GiangVien WHERE MaGV = :code LIMIT 1');
             $stmt->execute([':code' => $oldCode]);
             if (!$stmt->fetch()) {
-                jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy giáo viên.'], 404);
+                jsonResponse(['status' => 'error', 'message' => 'Giao vien khong ton tai.'], 404);
                 return;
             }
 
@@ -872,7 +907,7 @@ class TeacherController
                     NgaySinh = :date_of_birth,
                     GioiTinh = :gender,
                     HocHamHocVi = :academic_title,
-                    LopPhuTrach = :homeroom_class,
+                    MaKhoa = :ma_khoa,
                     Email = :email,
                     SoDienThoai = :phone,
                     TrangThai = :status
@@ -884,7 +919,7 @@ class TeacherController
                 ':date_of_birth' => $dateOfBirth ?: null,
                 ':gender' => $gender,
                 ':academic_title' => $academicTitle ?: null,
-                ':homeroom_class' => $homeroomClass ?: null,
+                ':ma_khoa' => $maKhoa,
                 ':email' => $email ?: null,
                 ':phone' => $phone ?: null,
                 ':status' => $status,
@@ -960,5 +995,3 @@ class TeacherController
         }
     }
 }
-
-

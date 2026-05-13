@@ -16,8 +16,41 @@ const bulkResult = ref({ inserted_count: 0, skipped_count: 0, skipped: [] })
 const bulkFileName = ref('')
 
 const step = ref('input')
-const meta = ref({ departments: [], teachers: [] })
+const meta = ref({ departments: [], teachers: [], courses: [] })
 const SEMESTER_OPTIONS = ['Kì I', 'Kì II', 'Kì hè']
+const validatingCourse = ref(false)
+
+async function onCourseCodeChange(courseCode) {
+  const code = asText(courseCode).toUpperCase()
+  if (!code) {
+    errors.course_code = ''
+    form.course_name = ''
+    form.credits = ''
+    return
+  }
+
+  validatingCourse.value = true
+  try {
+    const res = await fetch(`/api/courses?mode=subject&code=${encodeURIComponent(code)}`)
+    const data = await res.json().catch(() => ({}))
+    
+    if (res.ok && data.status === 'success' && data.data) {
+      form.course_name = String(data.data.course_name || data.data.TenMon || '').trim()
+      form.credits = String(data.data.credits || data.data.SoTinChi || '').trim()
+      errors.course_code = ''
+    } else {
+      errors.course_code = 'Mã môn học không tồn tại trong hệ thống.'
+      form.course_name = ''
+      form.credits = ''
+    }
+  } catch (error) {
+    errors.course_code = 'Không thể kiểm tra mã môn học.'
+    form.course_name = ''
+    form.credits = ''
+  } finally {
+    validatingCourse.value = false
+  }
+}
 
 const form = reactive({
   section_code: '',
@@ -83,7 +116,7 @@ function validateForm() {
     ok = false
   }
   if (!asText(form.teacher_code)) {
-    errors.teacher_code = 'HĂ£y chá»n mĂ£ giĂ¡o viĂªn.'
+    errors.teacher_code = 'Hãy chọn mã giáo viên.'
     ok = false
   }
   if (asText(form.section_code) && !/^[A-Za-z0-9._-]{3,30}$/.test(asText(form.section_code))) {
@@ -297,12 +330,13 @@ async function submitForm() {
 async function loadMeta() {
   loadingMeta.value = true
   try {
-    const res = await fetch('/api/courses?mode=meta')
+    const res = await fetch('/api/courses?action=meta')
     const data = await res.json().catch(() => ({}))
     if (res.ok && data.status === 'success') {
-      meta.value = data.data || { departments: [], teachers: [] }
+      meta.value = data.data || { departments: [], teachers: [], courses: [] }
       if (!Array.isArray(meta.value.departments)) meta.value.departments = []
       if (!Array.isArray(meta.value.teachers)) meta.value.teachers = []
+      if (!Array.isArray(meta.value.courses)) meta.value.courses = []
     }
 
     if (!meta.value.departments.length) {
@@ -362,7 +396,22 @@ onMounted(async () => {
         <div>
           <div class="inline-row two">
             <input v-model="form.section_code" type="text" maxlength="30" placeholder="Mã lớp học phần (tùy chọn)" />
-            <input v-model="form.course_code" type="text" maxlength="30" placeholder="Ví dụ: MAT3567" />
+            <div class="course-input-wrapper">
+              <input
+                v-model="form.course_code"
+                type="text"
+                maxlength="30"
+                placeholder="Nhập hoặc chọn mã môn"
+                list="course-list"
+                @blur="onCourseCodeChange(form.course_code)"
+              />
+              <datalist id="course-list">
+                <option v-for="c in meta.courses || []" :key="c.course_code" :value="c.course_code">
+                  {{ c.course_code }} - {{ c.course_name }}
+                </option>
+              </datalist>
+              <div v-if="validatingCourse" class="loading-indicator">Đang kiểm tra...</div>
+            </div>
           </div>
           <div class="inline-row two">
             <p v-if="errors.section_code" class="error">{{ errors.section_code }}</p>
@@ -372,13 +421,13 @@ onMounted(async () => {
 
         <label>Tên môn học *</label>
         <div>
-          <input v-model="form.course_name" type="text" maxlength="150" placeholder="Nhập tên môn học" />
+          <input v-model="form.course_name" type="text" maxlength="150" placeholder="Tên môn học (tự động điền)" readonly />
           <p v-if="errors.course_name" class="error">{{ errors.course_name }}</p>
         </div>
 
         <label>Số tín chỉ</label>
         <div>
-          <input v-model="form.credits" type="number" min="1" placeholder="Số tín chỉ" />
+          <input v-model="form.credits" type="text" placeholder="Số tín chỉ (tự động điền)" readonly />
           <p v-if="errors.credits" class="error">{{ errors.credits }}</p>
         </div>
 
@@ -557,6 +606,9 @@ h1, h2 { color: #007336; margin: 0; }
 .inline-row.two { grid-template-columns: 1fr 1fr; }
 label { font-weight: 700; padding-top: 10px; }
 input, select { width: 100%; box-sizing: border-box; border: 1px solid #c7d3e2; border-radius: 8px; padding: 10px 12px; }
+input[readonly] { background-color: #f5f5f5; color: #666; cursor: not-allowed; }
+.course-input-wrapper { position: relative; }
+.loading-indicator { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #666; pointer-events: none; }
 .label { font-weight: 700; color: #1f3553; }
 .state { background: #f4f7fc; padding: 12px; border-radius: 8px; }
 .state.error { color: #c52a2a; background: #fdeeee; }

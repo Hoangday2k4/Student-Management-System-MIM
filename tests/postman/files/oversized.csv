@@ -1,0 +1,19 @@
+
+student_code,full_name,class_name,gender,status,email
+"OVR1","Oversized Student 1","CTK42","Nam","Dang hoc","ovr1@example.test"
+"OVR2","Oversized Student 2","CTK42","Nu","Dang hoc","ovr2@example.test"
+
+"OVR3","Oversized Student 3","CTK42","Nam","Dang hoc","ovr3@example.test"
+"OVR4","Oversized Student 4","CTK42","Nu","Dang hoc","ovr4@example.test"
+
+"OVR5","Oversized Student 5","CTK42","Nam","Dang hoc","ovr5@example.test"
+"OVR6","Oversized Student 6","CTK42","Nu","Dang hoc","ovr6@example.test"
+
+"OVR7","Oversized Student 7","CTK42","Nam","Dang hoc","ovr7@example.test"
+"OVR8","Oversized Student 8","CTK42","Nu","Dang hoc","ovr8@example.test"
+
+"OVR9","Oversized Student 9","CTK42","Nam","Dang hoc","ovr9@example.test"
+"OVR10","Oversized Student 10","CTK42","Nu","Dang hoc","ovr10@example.test"
+
+// repeated to increase size
+

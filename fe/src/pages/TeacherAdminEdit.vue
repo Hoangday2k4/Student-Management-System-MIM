@@ -21,7 +21,6 @@ const form = reactive({
   email: '',
   academic_title: '',
   department: '',
-  homeroom_class: '',
   status: 'Đang công tác',
 })
 
@@ -91,8 +90,7 @@ async function loadDetail() {
     form.phone = String(data.phone || '')
     form.email = String(data.email || '')
     form.academic_title = String(data.academic_title || '')
-    form.department = String(data.department || '')
-    form.homeroom_class = String(data.homeroom_class || '')
+    form.department = String(data.department_code || '')
     form.status = String(data.status || 'Đang công tác') || 'Đang công tác'
   } catch (error) {
     serverMessage.value = 'Không kết nối được máy chủ.'
@@ -136,7 +134,6 @@ async function submitForm() {
         email: form.email.trim(),
         academic_title: form.academic_title.trim(),
         department: form.department.trim(),
-        homeroom_class: form.homeroom_class.trim(),
         status: form.status,
       }),
     })
@@ -220,9 +217,6 @@ onMounted(async () => {
             </select>
             <p v-if="errors.department" class="error">{{ errors.department }}</p>
           </div>
-
-          <label for="homeroom_class">Lớp phụ trách</label>
-          <input id="homeroom_class" v-model="form.homeroom_class" type="text" maxlength="100" placeholder="Để trống nếu không chủ nhiệm lớp nào" />
 
           <label for="status">Trạng thái</label>
           <select id="status" v-model="form.status">

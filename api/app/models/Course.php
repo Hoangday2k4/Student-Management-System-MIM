@@ -71,7 +71,54 @@ class Course
         return Faculty::resolveIdByName($pdo, (string)$department);
     }
 
-    private static function resolveNganhCode(PDO $pdo, ?string $department): ?string
+    /**
+     * Resolve Faculty (Khoa) code từ tên Khoa hoặc Ngành
+     * Logic: Input có thể là tên Khoa, tên Ngành, hoặc Mã Khoa
+     * Output: MaKhoa để lưu vào LopHocPhan
+     */
+    private static function resolveKhoaCode(PDO $pdo, ?string $input): ?string
+    {
+        $value = trim((string)$input);
+        if ($value === '') {
+            return null;
+        }
+
+        // 1. Try matching Khoa code (e.g., "KHOA_CS")
+        $stmt = $pdo->prepare('SELECT MaKhoa FROM Khoa WHERE lower(MaKhoa) = lower(:v) LIMIT 1');
+        $stmt->execute([':v' => $value]);
+        $code = $stmt->fetchColumn();
+        if ($code !== false && trim((string)$code) !== '') {
+            return trim((string)$code);
+        }
+
+        // 2. Try matching Khoa name (e.g., "Khoa Công nghệ Thông tin")
+        $stmt = $pdo->prepare('SELECT MaKhoa FROM Khoa WHERE lower(TenKhoa) = lower(:v) LIMIT 1');
+        $stmt->execute([':v' => $value]);
+        $code = $stmt->fetchColumn();
+        if ($code !== false && trim((string)$code) !== '') {
+            return trim((string)$code);
+        }
+
+        // 3. Try matching Nganh name to get its Khoa (e.g., "Công nghệ Phần mềm" -> Khoa CNTT)
+        $stmt = $pdo->prepare('SELECT MaKhoa FROM Nganh WHERE lower(TenNganh) = lower(:v) LIMIT 1');
+        $stmt->execute([':v' => $value]);
+        $code = $stmt->fetchColumn();
+        if ($code !== false && trim((string)$code) !== '') {
+            return trim((string)$code);
+        }
+
+        // 4. Try matching Nganh code to get its Khoa
+        $stmt = $pdo->prepare('SELECT MaKhoa FROM Nganh WHERE lower(MaNganh) = lower(:v) LIMIT 1');
+        $stmt->execute([':v' => $value]);
+        $code = $stmt->fetchColumn();
+        if ($code !== false && trim((string)$code) !== '') {
+            return trim((string)$code);
+        }
+
+        return null;
+    }
+
+     private static function resolveNganhCode(PDO $pdo, ?string $department): ?string
     {
         $value = trim((string)$department);
         if ($value === '') {
@@ -139,6 +186,8 @@ class Course
             $pdo = get_db_connection();
         }
         Faculty::ensureSchema($pdo);
+
+        // 1. TẠO BẢNG MỚI (Dành cho Database trống)
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS MonHoc (
                 MaMon TEXT PRIMARY KEY,
@@ -148,6 +197,11 @@ class Course
                 MaNganh TEXT
             )'
         );
+        $pdo->exec('CREATE TABLE IF NOT EXISTS Nganh (
+            MaNganh TEXT PRIMARY KEY, 
+            TenNganh TEXT NOT NULL,
+            MaKhoa TEXT
+        )');
         $pdo->exec(
             'CREATE TABLE IF NOT EXISTS GiangVien (
                 MaGV TEXT PRIMARY KEY,
@@ -165,6 +219,7 @@ class Course
                 MaLHP TEXT PRIMARY KEY,
                 MaMon TEXT,
                 MaGV TEXT,
+                MaKhoa TEXT,
                 HocKy INTEGER,
                 NamHoc TEXT,
                 SoLuongToiDa INTEGER
@@ -213,7 +268,63 @@ class Course
         );
         $pdo->exec('CREATE INDEX IF NOT EXISTS idx_lhpmap_ma ON LopHocPhanMap(MaLHP)');
 
-        // Chuyen CaHoc tu INTEGER sang TEXT (luu dang "start-end")
+        // ---------------------------------------------------------
+        // 2. MIGRATION ĐỂ VÁ LỖI CHO DATABASE CŨ (QUAN TRỌNG)
+        // ---------------------------------------------------------
+
+        // A. Cập nhật bảng MonHoc
+        $mhCols = $pdo->query('PRAGMA table_info(MonHoc)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $mhNames = [];
+        foreach ($mhCols as $c) $mhNames[(string)$c['name']] = true;
+        
+        if (!isset($mhNames['LoaiMon'])) {
+            $pdo->exec('ALTER TABLE MonHoc ADD COLUMN LoaiMon TEXT DEFAULT "BAT_BUOC"');
+        }
+        if (!isset($mhNames['MaNganh'])) {
+            $pdo->exec('ALTER TABLE MonHoc ADD COLUMN MaNganh TEXT');
+        }
+
+        // B. Cập nhật bảng LopHocPhan
+        $columns = $pdo->query('PRAGMA table_info(LopHocPhan)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $names = [];
+        foreach ($columns as $c) $names[(string)$c['name']] = true;
+        
+        if (!isset($names['MaKhoa'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN MaKhoa TEXT');
+        }
+        if (!isset($names['TrongSoCC'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoCC REAL DEFAULT 0');
+        }
+        if (!isset($names['TrongSoGK'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoGK REAL DEFAULT 0');
+        }
+        if (!isset($names['TrongSoCK'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoCK REAL DEFAULT 0');
+        }
+        if (!isset($names['CreatedAt'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN CreatedAt TEXT');
+            $pdo->exec("UPDATE LopHocPhan SET CreatedAt = datetime('now', 'localtime') WHERE CreatedAt IS NULL OR trim(CreatedAt) = ''");
+        }
+        if (!isset($names['TrangThai'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrangThai TEXT DEFAULT "ACTIVE"');
+        }
+        
+        
+        if (!isset($names['NgayHetHan'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN NgayHetHan TEXT');
+        }
+        if (!isset($names['IsLocked'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN IsLocked INTEGER DEFAULT 0');
+        }
+        if (!isset($names['IsStarted'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN IsStarted INTEGER DEFAULT 0');
+        }
+        if (!isset($names['StartedAt'])) {
+            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN StartedAt TEXT');
+        }
+        // ----------------------------------
+
+        // C. Cập nhật bảng ThoiKhoaBieu (Chuyen CaHoc tu INTEGER sang TEXT)
         $tkbCols = $pdo->query('PRAGMA table_info(ThoiKhoaBieu)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $caHocType = '';
         foreach ($tkbCols as $col) {
@@ -247,21 +358,24 @@ class Course
             $pdo->exec('ALTER TABLE ThoiKhoaBieu_new RENAME TO ThoiKhoaBieu');
         }
 
-        $columns = $pdo->query('PRAGMA table_info(LopHocPhan)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        $names = [];
-        foreach ($columns as $c) $names[(string)$c['name']] = true;
-        if (!isset($names['TrongSoCC'])) $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoCC REAL DEFAULT 0');
-        if (!isset($names['TrongSoGK'])) $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoGK REAL DEFAULT 0');
-        if (!isset($names['TrongSoCK'])) $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN TrongSoCK REAL DEFAULT 0');
-        if (!isset($names['CreatedAt'])) {
-            // SQLite khong cho ADD COLUMN voi default khong hang so (CURRENT_TIMESTAMP)
-            $pdo->exec('ALTER TABLE LopHocPhan ADD COLUMN CreatedAt TEXT');
-            $pdo->exec("UPDATE LopHocPhan SET CreatedAt = datetime('now', 'localtime') WHERE CreatedAt IS NULL OR trim(CreatedAt) = ''");
-        }
-
         $rows = $pdo->query('SELECT MaLHP FROM LopHocPhan')->fetchAll(PDO::FETCH_COLUMN) ?: [];
         foreach ($rows as $maLHP) {
             self::ensureMapForLhp($pdo, (string)$maLHP);
+        }
+
+        // Phần điểm danh & Điểm tổng kết
+        $kqCols = $pdo->query('PRAGMA table_info(KetQuaHocTap)')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $kqNames = [];
+        foreach ($kqCols as $c) $kqNames[(string)$c['name']] = true;
+
+        if (!isset($kqNames['LichSuDiemDanh'])) {
+            $pdo->exec('ALTER TABLE KetQuaHocTap ADD COLUMN LichSuDiemDanh TEXT DEFAULT ""');
+        }
+        if (!isset($kqNames['SoBuoiVang'])) {
+            $pdo->exec('ALTER TABLE KetQuaHocTap ADD COLUMN SoBuoiVang INTEGER DEFAULT 0');
+        }
+        if (!isset($kqNames['DiemTongKet'])) {
+            $pdo->exec('ALTER TABLE KetQuaHocTap ADD COLUMN DiemTongKet REAL');
         }
     }
 
@@ -282,7 +396,7 @@ class Course
             }
         }
 
-        $maNganh = self::resolveNganh($pdo, (string)($data['department'] ?? ''));
+       $maNganh = self::resolveNganhCode($pdo, (string)($data['department'] ?? ''));
         $stmt = $pdo->prepare(
             'INSERT INTO MonHoc (MaMon, TenMon, SoTinChi, LoaiMon, MaNganh)
              VALUES (:ma_mon,:ten_mon,:so_tin_chi,"BAT_BUOC",:ma_nganh)
@@ -298,17 +412,21 @@ class Course
             ':ma_nganh' => $maNganh,
         ]);
 
+        // Resolve Khoa (Faculty) code từ input department
+        $maKhoa = self::resolveKhoaCode($pdo, (string)($data['department'] ?? ''));
+
         $stmt = $pdo->prepare(
             'INSERT INTO LopHocPhan (
-                MaLHP, MaMon, MaGV, HocKy, NamHoc, SoLuongToiDa, TrongSoCC, TrongSoGK, TrongSoCK, CreatedAt
+                MaLHP, MaMon, MaGV, MaKhoa, HocKy, NamHoc, SoLuongToiDa, TrongSoCC, TrongSoGK, TrongSoCK, CreatedAt
             ) VALUES (
-                :ma_lhp, :ma_mon, :ma_gv, :hoc_ky, :nam_hoc, :max, 0, 0, 0, CURRENT_TIMESTAMP
+                :ma_lhp, :ma_mon, :ma_gv, :ma_khoa, :hoc_ky, :nam_hoc, :max, 0, 0, 0, CURRENT_TIMESTAMP
             )'
         );
         $stmt->execute([
             ':ma_lhp' => $maLHP,
             ':ma_mon' => $maMon,
             ':ma_gv' => $data['teacher_code'] ?: null,
+            ':ma_khoa' => $maKhoa,
             ':hoc_ky' => $data['semester'] !== null ? (int)$data['semester'] : null,
             ':nam_hoc' => trim((string)($data['academic_year'] ?? '')) !== '' ? trim((string)$data['academic_year']) : null,
             ':max' => $data['max_students'] !== null ? (int)$data['max_students'] : null,
@@ -343,7 +461,7 @@ class Course
         $oldMaMon = (string)$stmt->fetchColumn();
         $newMaMon = trim((string)$data['course_code']);
 
-        $maNganh = self::resolveNganh($pdo, (string)($data['department'] ?? ''));
+        $maNganh = self::resolveNganhCode($pdo, (string)($data['department'] ?? ''));
         $stmt = $pdo->prepare(
             'INSERT INTO MonHoc (MaMon, TenMon, SoTinChi, LoaiMon, MaNganh)
              VALUES (:ma_mon,:ten_mon,:so_tin_chi,"BAT_BUOC",:ma_nganh)
@@ -359,10 +477,14 @@ class Course
             ':ma_nganh' => $maNganh,
         ]);
 
+        // Resolve Khoa (Faculty) code từ input department
+        $maKhoa = self::resolveKhoaCode($pdo, (string)($data['department'] ?? ''));
+
         $stmt = $pdo->prepare(
             'UPDATE LopHocPhan
              SET MaMon = :ma_mon,
                  MaGV = :ma_gv,
+                 MaKhoa = :ma_khoa,
                  HocKy = :hoc_ky,
                  NamHoc = :nam_hoc,
                  SoLuongToiDa = :max
@@ -371,6 +493,7 @@ class Course
         $stmt->execute([
             ':ma_mon' => $newMaMon,
             ':ma_gv' => $data['teacher_code'] ?: null,
+            ':ma_khoa' => $maKhoa,
             ':hoc_ky' => $data['semester'] !== null ? (int)$data['semester'] : null,
             ':nam_hoc' => trim((string)($data['academic_year'] ?? '')) !== '' ? trim((string)$data['academic_year']) : null,
             ':max' => $data['max_students'] !== null ? (int)$data['max_students'] : null,
@@ -417,13 +540,7 @@ class Course
         $pdo->prepare('DELETE FROM LopHocPhan WHERE MaLHP = :ma_lhp')->execute([':ma_lhp' => $maLHP]);
         $pdo->prepare('DELETE FROM LopHocPhanMap WHERE MaLHP = :ma_lhp')->execute([':ma_lhp' => $maLHP]);
 
-        if ($maMon !== '') {
-            $stmt = $pdo->prepare('SELECT COUNT(1) FROM LopHocPhan WHERE MaMon = :ma_mon');
-            $stmt->execute([':ma_mon' => $maMon]);
-            if ((int)$stmt->fetchColumn() === 0) {
-                $pdo->prepare('DELETE FROM MonHoc WHERE MaMon = :ma_mon')->execute([':ma_mon' => $maMon]);
-            }
-        }
+       
     }
 
     public static function replaceEnrollmentsWithPdo(PDO $pdo, int $courseId, array $studentCodes): void
@@ -466,19 +583,21 @@ class Course
         return array_map(static fn($r) => (string)$r['MaSV'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
-    public static function findById(int $id)
+   public static function findById(int $id)
     {
         self::ensureSchema();
         $pdo = get_db_connection();
         $maLHP = self::getMaLhpByLegacyId($pdo, $id);
         if (!$maLHP) return false;
+        
+        // Simplify: Lấy Khoa trực tiếp từ LopHocPhan.MaKhoa
         $stmt = $pdo->prepare(
-            'SELECT l.MaLHP, l.MaMon, l.MaGV, l.HocKy, l.NamHoc, l.SoLuongToiDa, l.TrongSoCC, l.TrongSoGK, l.TrongSoCK, l.CreatedAt,
-                    m.TenMon, m.SoTinChi, ng.TenNganh, n.TenKhoa, g.HoTen AS teacher_name
+            'SELECT l.MaLHP, l.MaMon, l.MaGV, l.MaKhoa, l.HocKy, l.NamHoc, l.SoLuongToiDa, l.TrongSoCC, l.TrongSoGK, l.TrongSoCK, l.CreatedAt, l.IsLocked, l.NgayHetHan, l.IsStarted, l.StartedAt,
+                    m.TenMon, m.SoTinChi,
+                    k.TenKhoa, g.HoTen AS teacher_name
              FROM LopHocPhan l
              LEFT JOIN MonHoc m ON m.MaMon = l.MaMon
-             LEFT JOIN Nganh ng ON ng.MaNganh = m.MaNganh
-             LEFT JOIN Khoa n ON n.MaKhoa = ng.MaKhoa
+             LEFT JOIN Khoa k ON k.MaKhoa = l.MaKhoa
              LEFT JOIN GiangVien g ON g.MaGV = l.MaGV
              WHERE l.MaLHP = :ma_lhp
              LIMIT 1'
@@ -486,9 +605,14 @@ class Course
         $stmt->execute([':ma_lhp' => $maLHP]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row) return false;
+
         $scheduleInfo = self::buildScheduleClassroom($pdo, $maLHP);
         $countStmt = $pdo->prepare('SELECT COUNT(1) FROM KetQuaHocTap WHERE MaLHP = :ma_lhp');
         $countStmt->execute([':ma_lhp' => $maLHP]);
+        
+        // Lấy Tên Khoa từ LopHocPhan.MaKhoa
+        $deptName = (string)($row['TenKhoa'] ?? '');
+
         return [
             'id' => $id,
             'section_code' => $row['MaLHP'] ?? '',
@@ -498,7 +622,8 @@ class Course
             'teacher_code' => $row['MaGV'] ?? '',
             'semester' => $row['HocKy'] !== null ? (int)$row['HocKy'] : null,
             'academic_year' => $row['NamHoc'] ?? '',
-            'department' => (($row['TenKhoa'] ?? '') !== '' ? (string)$row['TenKhoa'] : (string)($row['TenNganh'] ?? '')),
+            'department' => $deptName,
+            'department_name' => $deptName,
             'schedule' => $scheduleInfo['schedule'],
             'classroom' => $scheduleInfo['classroom'],
             'max_students' => $row['SoLuongToiDa'] !== null ? (int)$row['SoLuongToiDa'] : null,
@@ -507,7 +632,11 @@ class Course
             'weight_ck' => (float)($row['TrongSoCK'] ?? 0),
             'created_at' => $row['CreatedAt'] ?? '',
             'teacher_name' => $row['teacher_name'] ?? '',
-            'enrolled_count' => (int)$countStmt->fetchColumn(),
+            'enrolled_count' => (int)$countStmt->fetchColumn(), // Đây là số SV thực tế hiện có trong lớp
+            'IsLocked' => $row['IsLocked'] !== null ? (int)$row['IsLocked'] : 0,
+            'NgayHetHan' => $row['NgayHetHan'] ?? null,
+            'IsStarted' => $row['IsStarted'] !== null ? (int)$row['IsStarted'] : 0,
+            'StartedAt' => $row['StartedAt'] ?? null,
         ];
     }
 
@@ -529,11 +658,12 @@ class Course
         $maLHP = self::getMaLhpByLegacyId($pdo, $courseId);
         if (!$maLHP) return [];
         $stmt = $pdo->prepare(
-            'SELECT s.MaSV AS student_code, s.HoTen AS full_name, s.MaLop AS class_name, n.TenKhoa AS faculty, s.Email AS email, s.SoDienThoai AS phone
+            'SELECT s.MaSV AS student_code, s.HoTen AS full_name, s.MaLop AS class_name,ng.TenNganh AS major, n.TenKhoa AS faculty, s.Email AS email, s.SoDienThoai AS phone
              FROM KetQuaHocTap k
              INNER JOIN SinhVien s ON s.MaSV = k.MaSV
              LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
-             LEFT JOIN Khoa n ON n.MaKhoa = l.MaNganh
+             LEFT JOIN Nganh ng ON ng.MaNganh = l.MaNganh
+             LEFT JOIN Khoa n ON n.MaKhoa = ng.MaKhoa -- SỬA LỖI Ở ĐÂY: JOIN Khoa với Ngành thay vì Lớp Sinh Hoạt
              WHERE k.MaLHP = :ma_lhp
              ORDER BY s.MaSV ASC'
         );
@@ -601,11 +731,10 @@ class Course
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        $sql = 'SELECT m.MaMon, m.TenMon, m.SoTinChi, ng.TenNganh, n.TenKhoa, l.MaLHP, l.MaGV, l.HocKy, l.NamHoc, l.SoLuongToiDa, l.CreatedAt, g.HoTen AS teacher_name
+        $sql = 'SELECT m.MaMon, m.TenMon, m.SoTinChi, n.TenKhoa, l.MaLHP, l.MaGV, l.MaKhoa, l.HocKy, l.NamHoc, l.SoLuongToiDa, l.CreatedAt, g.HoTen AS teacher_name, l.IsLocked, l.NgayHetHan, l.IsStarted, l.StartedAt
                 FROM LopHocPhan l
                 INNER JOIN MonHoc m ON m.MaMon = l.MaMon
-                LEFT JOIN Nganh ng ON ng.MaNganh = m.MaNganh
-                LEFT JOIN Khoa n ON n.MaKhoa = ng.MaKhoa
+                LEFT JOIN Khoa n ON n.MaKhoa = l.MaKhoa
                 LEFT JOIN GiangVien g ON g.MaGV = l.MaGV
                 WHERE 1=1';
         $params = [];
@@ -645,13 +774,17 @@ class Course
                 'teacher_code' => $row['MaGV'] ?? '',
                 'semester' => $row['HocKy'] !== null ? (int)$row['HocKy'] : null,
                 'academic_year' => $row['NamHoc'] ?? '',
-                'department' => (($row['TenKhoa'] ?? '') !== '' ? (string)$row['TenKhoa'] : (string)($row['TenNganh'] ?? '')),
+                'department' => (string)($row['TenKhoa'] ?? ''),
                 'schedule' => $sch['schedule'],
                 'classroom' => $sch['classroom'],
                 'max_students' => $row['SoLuongToiDa'] !== null ? (int)$row['SoLuongToiDa'] : null,
                 'created_at' => $row['CreatedAt'] ?? '',
                 'teacher_name' => $row['teacher_name'] ?? '',
                 'enrolled_count' => (int)$cst->fetchColumn(),
+                'IsLocked' => $row['IsLocked'] !== null ? (int)$row['IsLocked'] : 0,
+                'NgayHetHan' => $row['NgayHetHan'] ?? null,
+                'IsStarted' => $row['IsStarted'] !== null ? (int)$row['IsStarted'] : 0,
+                'StartedAt' => $row['StartedAt'] ?? null,
             ];
         }
         return $out;
@@ -723,7 +856,7 @@ class Course
     {
         self::ensureSchema($pdo);
 
-        $courseCode = strtoupper(trim((string)($data['course_code'] ?? '')));
+        $courseCode = trim((string)($data['course_code'] ?? ''));
         $courseName = trim((string)($data['course_name'] ?? ''));
         $creditsRaw = trim((string)($data['credits'] ?? ''));
         $departmentRaw = trim((string)($data['department'] ?? ''));
@@ -737,6 +870,15 @@ class Course
         }
         if ($creditsRaw === '' || !preg_match('/^\d+$/', $creditsRaw) || (int)$creditsRaw <= 0) {
             throw new RuntimeException('Số tín chỉ phải là số nguyên dương.');
+        }
+
+        $providedCourseType = trim((string)($data['course_type'] ?? ''));
+        if ($providedCourseType !== '') {
+            $upper = strtoupper($providedCourseType);
+            $allowed = ['BAT_BUOC', 'TU_CHON', 'TUY_CHON'];
+            if (!in_array($upper, $allowed, true)) {
+                throw new RuntimeException('Loại môn học không hợp lệ.');
+            }
         }
 
         $departmentCode = self::resolveNganhCode($pdo, $departmentRaw);
@@ -779,19 +921,19 @@ class Course
 
     public static function deleteSubjectByCodeWithPdo(PDO $pdo, string $courseCode): void
     {
-        self::ensureSchema($pdo);
-        $courseCode = strtoupper(trim($courseCode));
+        // Caller is responsible for calling ensureSchema before starting a transaction
+        $courseCode = trim($courseCode);
         if ($courseCode === '') {
             throw new RuntimeException('Thiếu mã môn học.');
         }
 
-        $stmt = $pdo->prepare('SELECT COUNT(1) FROM LopHocPhan WHERE MaMon = :ma_mon');
+        $stmt = $pdo->prepare('SELECT COUNT(1) FROM LopHocPhan WHERE upper(MaMon) = upper(:ma_mon)');
         $stmt->execute([':ma_mon' => $courseCode]);
         if ((int)$stmt->fetchColumn() > 0) {
             throw new RuntimeException('Không thể xóa môn học vì đã có lớp học phần.');
         }
 
-        $del = $pdo->prepare('DELETE FROM MonHoc WHERE MaMon = :ma_mon');
+        $del = $pdo->prepare('DELETE FROM MonHoc WHERE upper(MaMon) = upper(:ma_mon)');
         $del->execute([':ma_mon' => $courseCode]);
         if ($del->rowCount() < 1) {
             throw new RuntimeException('Không tìm thấy môn học.');
@@ -846,18 +988,18 @@ class Course
 
     public static function updateSubjectByCodeWithPdo(PDO $pdo, string $originalCode, array $data): array
     {
-        self::ensureSchema($pdo);
+        // Caller is responsible for calling ensureSchema before starting a transaction
         $originalCode = strtoupper(trim($originalCode));
         if ($originalCode === '') {
             throw new RuntimeException('Thiếu mã môn học gốc.');
         }
 
-        $current = self::findSubjectByCode($originalCode);
+        $current = self::findSubjectByCode($originalCode, $pdo);
         if (!$current) {
             throw new RuntimeException('Không tìm thấy môn học.');
         }
 
-        $newCode = strtoupper(trim((string)($data['course_code'] ?? '')));
+        $newCode = trim((string)($data['course_code'] ?? ''));
         $newName = trim((string)($data['course_name'] ?? ''));
         $creditsRaw = trim((string)($data['credits'] ?? ''));
         $departmentRaw = trim((string)($data['department'] ?? ''));
@@ -912,11 +1054,15 @@ class Course
             ]);
         }
 
-        $updated = self::findSubjectByCode($newCode);
-        if (!$updated) {
-            throw new RuntimeException('Không thể đọc lại dữ liệu môn học sau cập nhật.');
-        }
-        return $updated;
+        // Return updated data directly to avoid a second complex query inside the transaction
+        return [
+            'course_code'     => $newCode,
+            'course_name'     => $newName,
+            'credits'         => (int)$creditsRaw,
+            'course_type'     => self::normalizeCourseType($courseType),
+            'department_code' => (string)($departmentCode ?? ''),
+            'department_name' => (string)($current['department_name'] ?? ''),
+        ];
     }
 
     public static function listByTeacherCode(string $teacherCode): array
@@ -1003,6 +1149,166 @@ class Course
             'gk' => $row['DiemGiuaKy'] !== null ? (float)$row['DiemGiuaKy'] : null,
             'ck' => $row['DiemCuoiKy'] !== null ? (float)$row['DiemCuoiKy'] : null,
         ];
+    }
+    
+
+
+    // Phần điểm danh
+    public static function createNewLessonWithPdo(PDO $pdo, string $maLHP): int
+    {
+        // 1. Nối thêm số '0' vào cuối chuỗi lịch sử điểm danh của tất cả SV trong lớp
+        $stmt = $pdo->prepare("UPDATE KetQuaHocTap SET LichSuDiemDanh = IFNULL(LichSuDiemDanh, '') || '0' WHERE MaLHP = :ma_lhp");
+        $stmt->execute([':ma_lhp' => $maLHP]);
+
+        // 2. Cập nhật trạng thái lớp thành ACTIVE (Đang diễn ra) nếu chưa cập nhật
+        $upLhp = $pdo->prepare("UPDATE LopHocPhan SET TrangThai = 'ACTIVE' WHERE MaLHP = :ma_lhp AND (TrangThai IS NULL OR TrangThai = 'PENDING')");
+        $upLhp->execute([':ma_lhp' => $maLHP]);
+
+        // 3. Lấy số thứ tự buổi học vừa tạo
+        $check = $pdo->prepare("SELECT length(LichSuDiemDanh) FROM KetQuaHocTap WHERE MaLHP = :ma_lhp LIMIT 1");
+        $check->execute([':ma_lhp' => $maLHP]);
+        $lessonNum = (int)$check->fetchColumn();
+
+        // 4. KIỂM TRA & ĐẶT HẠN CHÓT (Nếu đây là buổi học ĐẦU TIÊN)
+        // if ($lessonNum === 1) {
+        //     // Tính toán thời điểm hiện tại cộng thêm 4 tháng
+        //     $expiryDate = date('Y-m-d H:i:s', strtotime('+4 months'));
+            
+        //     $setExpiry = $pdo->prepare("UPDATE LopHocPhan SET NgayHetHan = :expiry WHERE MaLHP = :ma_lhp");
+        //     $setExpiry->execute([
+        //         ':expiry' => $expiryDate,
+        //         ':ma_lhp' => $maLHP
+        //     ]);
+        // }
+
+        return $lessonNum;
+    }
+    //Phần điểm danh
+    public static function updateAttendanceWithPdo(PDO $pdo, string $maLHP, string $maSV, int $weekNumber, bool $isAbsent): void
+    {
+        $stmt = $pdo->prepare('SELECT LichSuDiemDanh FROM KetQuaHocTap WHERE MaLHP = :ma_lhp AND MaSV = :ma_sv LIMIT 1');
+        $stmt->execute([':ma_lhp' => $maLHP, ':ma_sv' => $maSV]);
+        $history = (string)$stmt->fetchColumn();
+
+        if ($weekNumber < 1 || $weekNumber > strlen($history)) {
+            throw new RuntimeException("Buổi học số $weekNumber chưa được tạo!");
+        }
+
+        // Cập nhật ký tự tại vị trí weekNumber - 1
+        $statusChar = $isAbsent ? '1' : '0';
+        $history[$weekNumber - 1] = $statusChar;
+
+       $up = $pdo->prepare('UPDATE KetQuaHocTap SET LichSuDiemDanh = :history WHERE MaLHP = :ma_lhp AND MaSV = :ma_sv');
+        $up->execute([':history' => $history, ':ma_lhp' => $maLHP, ':ma_sv' => $maSV]);
+
+        // ĐỔI TÊN HÀM Ở ĐÂY:
+        self::updateAbsenceCountWithPdo($pdo, $maLHP, $maSV);
+    }
+
+
+    //Phần điểm danh
+    public static function deleteLessonWithPdo(PDO $pdo, string $maLHP, int $lessonNumber): void
+    {
+        // 1. Kiểm tra số buổi hiện tại của lớp
+        $stmt = $pdo->prepare('SELECT LichSuDiemDanh FROM KetQuaHocTap WHERE MaLHP = :ma_lhp LIMIT 1');
+        $stmt->execute([':ma_lhp' => $maLHP]);
+        $history = (string)$stmt->fetchColumn();
+        $totalLessons = strlen($history);
+
+        if ($totalLessons === 0) {
+            throw new RuntimeException("Lớp học chưa có buổi học nào.");
+        }
+        if ($lessonNumber < 1 || $lessonNumber > $totalLessons) {
+            throw new RuntimeException("Buổi học số $lessonNumber không tồn tại!");
+        }
+
+        // 2. Cắt bỏ ký tự tại vị trí buổi học bị xóa cho toàn bộ sinh viên
+        // Lưu ý: substr trong SQLite đánh index từ 1 (không phải 0 như PHP)
+        $up = $pdo->prepare(
+            'UPDATE KetQuaHocTap 
+             SET LichSuDiemDanh = substr(LichSuDiemDanh, 1, :pos - 1) || substr(LichSuDiemDanh, :pos + 1) 
+             WHERE MaLHP = :ma_lhp'
+        );
+        $up->execute([
+            ':pos' => $lessonNumber, 
+            ':ma_lhp' => $maLHP
+        ]);
+
+        // 3. Lấy danh sách sinh viên để tính toán lại điểm (vì số buổi vắng có thể bị thay đổi)
+        $svStmt = $pdo->prepare('SELECT MaSV FROM KetQuaHocTap WHERE MaLHP = :ma_lhp');
+        $svStmt->execute([':ma_lhp' => $maLHP]);
+        $svList = $svStmt->fetchAll(PDO::FETCH_COLUMN);
+
+        foreach ($svList as $maSV) {
+            // ĐỔI TÊN HÀM Ở ĐÂY:
+            self::updateAbsenceCountWithPdo($pdo, $maLHP, (string)$maSV);
+        }
+    }
+
+    //Điểm danh 
+    public static function updateAbsenceCountWithPdo(PDO $pdo, string $maLHP, string $maSV): void
+    {
+        $stmtKq = $pdo->prepare('SELECT LichSuDiemDanh FROM KetQuaHocTap WHERE MaLHP = :ma_lhp AND MaSV = :ma_sv LIMIT 1');
+        $stmtKq->execute([':ma_lhp' => $maLHP, ':ma_sv' => $maSV]);
+        $kq = $stmtKq->fetch(PDO::FETCH_ASSOC);
+        
+        if (!$kq) return;
+
+        $history = (string)($kq['LichSuDiemDanh'] ?? '');
+        $absences = substr_count($history, '1'); // Đếm số ký tự '1' (vắng)
+
+        $up = $pdo->prepare('UPDATE KetQuaHocTap SET SoBuoiVang = :absences WHERE MaLHP = :ma_lhp AND MaSV = :ma_sv');
+        $up->execute([
+            ':absences' => $absences,
+            ':ma_lhp' => $maLHP,
+            ':ma_sv' => $maSV
+        ]);
+    }
+
+    /**
+     * TÍNH TOÁN VÀ CẬP NHẬT ĐIỂM TỔNG KẾT
+     * Hàm này lấy điểm CC, GK, CK và nhân với trọng số tương ứng của Lớp học phần
+     */
+    public static function updateFinalGradeWithPdo(PDO $pdo, string $maLHP, string $maSV): void
+    {
+        // 1. Lấy điểm thành phần và trọng số của lớp
+        $stmt = $pdo->prepare(
+            'SELECT k.DiemChuyenCan, k.DiemGiuaKy, k.DiemCuoiKy, 
+                    l.TrongSoCC, l.TrongSoGK, l.TrongSoCK
+             FROM KetQuaHocTap k
+             JOIN LopHocPhan l ON k.MaLHP = l.MaLHP
+             WHERE k.MaLHP = :ma_lhp AND k.MaSV = :ma_sv LIMIT 1'
+        );
+        $stmt->execute([':ma_lhp' => $maLHP, ':ma_sv' => $maSV]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$row) return;
+
+        // 2. Ép kiểu dữ liệu
+        $cc = (float)($row['DiemChuyenCan'] ?? 0);
+        $gk = (float)($row['DiemGiuaKy'] ?? 0);
+        $ck = (float)($row['DiemCuoiKy'] ?? 0);
+        
+        $wCc = (float)($row['TrongSoCC'] ?? 0);
+        $wGk = (float)($row['TrongSoGK'] ?? 0);
+        $wCk = (float)($row['TrongSoCK'] ?? 0);
+
+        $total = 0;
+        $sumW = $wCc + $wGk + $wCk;
+        
+        // 3. Tính toán (Chỉ tính nếu tổng trọng số > 0, thường là 1.0 hoặc 100)
+        if ($sumW > 0) {
+            $total = ($cc * $wCc + $gk * $wGk + $ck * $wCk) / $sumW;
+            $total = round($total, 2); // Làm tròn 2 chữ số thập phân
+        }
+
+        // 4. Cập nhật vào Database (Cột DiemTongKet đã được thêm ở ensureSchema)
+        $up = $pdo->prepare('UPDATE KetQuaHocTap SET DiemTongKet = :total WHERE MaLHP = :ma_lhp AND MaSV = :ma_sv');
+        $up->execute([
+            ':total' => $total,
+            ':ma_lhp' => $maLHP,
+            ':ma_sv' => $maSV
+        ]);
     }
 }
 

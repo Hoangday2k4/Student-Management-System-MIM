@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -62,8 +62,7 @@ onMounted(async () => {
           <p><b>Họ tên:</b> {{ profile.full_name }}</p>
           <p><b>Ngày sinh:</b> {{ profile.date_of_birth || '-' }}</p>
           <p><b>Giới tính:</b> {{ profile.gender || '-' }}</p>
-          <p><b>Khoa/Bộ môn:</b> {{ profile.department || '-' }}</p>
-          <p><b>Lớp phụ trách:</b> {{ profile.homeroom_class || '-' }}</p>
+          <p><b>Khoa:</b> {{ profile.department || '-' }}</p>
           <p><b>Email:</b> {{ profile.email || '-' }}</p>
           <p><b>Số điện thoại:</b> {{ profile.phone || '-' }}</p>
           <p><b>Trạng thái:</b> {{ profile.status || '-' }}</p>

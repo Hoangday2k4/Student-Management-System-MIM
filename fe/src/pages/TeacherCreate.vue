@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -25,7 +25,6 @@ const form = reactive({
   phone: '',
   academic_title: '',
   department: '',
-  homeroom_class: '',
   status: 'Đang công tác',
 })
 
@@ -212,7 +211,6 @@ async function submitForm() {
         full_name: form.full_name.trim(),
         academic_title: form.academic_title.trim(),
         department: form.department.trim(),
-        homeroom_class: form.homeroom_class.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
       }),
@@ -312,9 +310,6 @@ async function submitForm() {
             <p v-if="errors.department" class="error">{{ errors.department }}</p>
           </div>
 
-          <label for="homeroom_class">Lớp phụ trách</label>
-          <input id="homeroom_class" v-model="form.homeroom_class" type="text" maxlength="40" placeholder="Để trống nếu không chủ nhiệm lớp nào" />
-
           <label for="status">Trạng thái</label>
           <select id="status" v-model="form.status">
             <option value="Đang công tác">Đang công tác</option>
@@ -326,7 +321,7 @@ async function submitForm() {
         <p v-if="serverMessage" class="error">{{ serverMessage }}</p>
         <p class="import-hint">
           Cột mặc định file import:
-          <b>MSGV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Email</b>, <b>SĐT</b>, <b>Học hàm</b>, <b>Mã khoa</b>, <b>Lớp phụ trách</b>, <b>Trạng thái</b>.
+          <b>MSGV</b>, <b>Họ tên</b>, <b>Ngày sinh</b>, <b>Giới tính</b>, <b>Email</b>, <b>SĐT</b>, <b>Học hàm</b>, <b>Mã khoa</b>, <b>Trạng thái</b>.
         </p>
         <div class="actions">
           <button type="submit" class="btn-primary">Xác nhận</button>
@@ -355,7 +350,6 @@ async function submitForm() {
           <span class="label">Số điện thoại</span><span>{{ form.phone || '-' }}</span>
           <span class="label">Học hàm</span><span>{{ form.academic_title || '-' }}</span>
           <span class="label">Mã khoa</span><span>{{ form.department || '-' }}</span>
-          <span class="label">Lớp phụ trách</span><span>{{ form.homeroom_class || '-' }}</span>
           <span class="label">Trạng thái</span><span>{{ form.status }}</span>
         </div>
         <p v-if="serverMessage" class="error">{{ serverMessage }}</p>
@@ -385,7 +379,6 @@ async function submitForm() {
                 <th>SĐT</th>
                 <th>Học hàm</th>
                 <th>Mã khoa</th>
-                <th>Lớp phụ trách</th>
                 <th>Trạng thái</th>
               </tr>
             </thead>
@@ -399,7 +392,6 @@ async function submitForm() {
                 <td>{{ row.phone || '-' }}</td>
                 <td>{{ row.academic_title || '-' }}</td>
                 <td>{{ row.department || '-' }}</td>
-                <td>{{ row.homeroom_class || '-' }}</td>
                 <td>{{ row.status || '-' }}</td>
               </tr>
             </tbody>

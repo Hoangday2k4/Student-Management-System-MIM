@@ -1,0 +1,268 @@
+{
+  "info": {
+    "name": "Student Management API",
+    "_postman_id": "sm-api-v2",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url",      "value": "{{INTEGRATION_BASE_URL}}" },
+    { "key": "admin_user",    "value": "admin" },
+    { "key": "admin_pass",    "value": "123456" },
+    { "key": "session_admin", "value": "" },
+    { "key": "session_teacher","value": "" },
+    { "key": "teacher_code",  "value": "T001" },
+    { "key": "student_code",  "value": "S001" },
+    { "key": "section_code",  "value": "" }
+  ],
+  "item": [
+
+    {
+      "name": "=== Part 1: Unauthenticated access (before login) ===",
+      "item": [
+        {
+          "name": "Unauthenticated - student list → 401",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{base_url}}/student.php", "host": ["{{base_url}}"], "path": ["student.php"] } },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('unauthenticated returns 401', () => pm.response.to.have.status(401));"
+          ] } }]
+        },
+        {
+          "name": "Unauthenticated - create lesson → 401",
+          "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"section_code\":\"X\"}" },
+            "url": { "raw": "{{base_url}}/course_detail.php?action=create-lesson", "host": ["{{base_url}}"], "path": ["course_detail.php"], "query": [{"key":"action","value":"create-lesson"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('create-lesson unauthenticated returns 401', () => pm.response.to.have.status(401));"
+          ] } }]
+        },
+        {
+          "name": "Unauthenticated - get attendance → 401",
+          "request": { "method": "GET", "header": [],
+            "url": { "raw": "{{base_url}}/course_detail.php?action=attendance&section_code=X&week_number=1", "host": ["{{base_url}}"], "path": ["course_detail.php"], "query": [{"key":"action","value":"attendance"},{"key":"section_code","value":"X"},{"key":"week_number","value":"1"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('get-attendance unauthenticated returns 401', () => pm.response.to.have.status(401));"
+          ] } }]
+        },
+        {
+          "name": "Unauthenticated - submit attendance → 401",
+          "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"section_code\":\"X\",\"week_number\":1,\"attendance_list\":[]}" },
+            "url": { "raw": "{{base_url}}/course_detail.php?action=submit-attendance", "host": ["{{base_url}}"], "path": ["course_detail.php"], "query": [{"key":"action","value":"submit-attendance"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('submit-attendance unauthenticated returns 401', () => pm.response.to.have.status(401));"
+          ] } }]
+        },
+        {
+          "name": "Unauthenticated - home → 401",
+          "request": { "method": "GET", "header": [], "url": { "raw": "{{base_url}}/home.php", "host": ["{{base_url}}"], "path": ["home.php"] } },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('home unauthenticated returns 401', () => pm.response.to.have.status(401));"
+          ] } }]
+        }
+      ]
+    },
+
+    {
+      "name": "=== Part 2: Authentication ===",
+      "item": [
+        {
+          "name": "Login - Wrong Password → error",
+          "request": { "method": "POST", "header": [], "body": { "mode": "urlencoded", "urlencoded": [{"key":"login_id","value":"admin"},{"key":"password","value":"wrongpassword"}] },
+            "url": { "raw": "{{base_url}}/login.php", "host": ["{{base_url}}"], "path": ["login.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('wrong password returns 200', () => pm.response.to.have.status(200));",
+            "pm.test('wrong password body has error status', () => { var b = pm.response.json(); pm.expect(b.status).to.equal('error'); });"
+          ] } }]
+        },
+        {
+          "name": "Login - Admin → success",
+          "request": { "method": "POST", "header": [], "body": { "mode": "urlencoded", "urlencoded": [{"key":"login_id","value":"{{admin_user}}"},{"key":"password","value":"{{admin_pass}}"}] },
+            "url": { "raw": "{{base_url}}/login.php", "host": ["{{base_url}}"], "path": ["login.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('admin login returns 200', () => pm.response.to.have.status(200));",
+            "pm.test('admin login body success', () => { var b = pm.response.json(); pm.expect(b.status).to.equal('success'); pm.expect(b.account_type).to.equal('staff'); });",
+            "var c = pm.response.headers.get('Set-Cookie'); if (c) { var m = c.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_admin', m[0]); }"
+          ] } }]
+        }
+      ]
+    },
+
+    {
+      "name": "=== Part 3: Admin - Student & Teacher management ===",
+      "item": [
+        {
+          "name": "Admin - List students authenticated → 200",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/student.php", "host": ["{{base_url}}"], "path": ["student.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('authenticated student list returns 200', () => pm.response.to.have.status(200));"
+          ] } }]
+        },
+        {
+          "name": "Admin - Create Teacher T001",
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"teacher_code\":\"T001\",\"full_name\":\"Test Teacher\",\"gender\":\"Nam\",\"status\":\"Dang cong tac\",\"email\":\"t001@example.test\"}" },
+            "url": { "raw": "{{base_url}}/teacher.php", "host": ["{{base_url}}"], "path": ["teacher.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('create teacher returns 201 or 409 (if already exists)', () => { pm.expect(pm.response.code).to.be.oneOf([201, 409]); });"
+          ] } }]
+        },
+        {
+          "name": "Admin - Create Student S001",
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"student_code\":\"S001\",\"full_name\":\"Test Student\",\"class_name\":\"CTK42\",\"gender\":\"Nam\",\"status\":\"Dang hoc\",\"email\":\"s001@example.test\"}" },
+            "url": { "raw": "{{base_url}}/student.php", "host": ["{{base_url}}"], "path": ["student.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('create student returns 201 or 409', () => { pm.expect(pm.response.code).to.be.oneOf([201, 409]); });"
+          ] } }]
+        },
+        {
+          "name": "Admin - List teachers authenticated → 200",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/teacher.php", "host": ["{{base_url}}"], "path": ["teacher.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('teacher list returns 200', () => pm.response.to.have.status(200));"
+          ] } }]
+        }
+      ]
+    },
+
+    {
+      "name": "=== Part 4: Course management ===",
+      "item": [
+        {
+          "name": "Admin - Create Course Section",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": [
+              "pm.environment.set('test_section_code', 'TESTSEC' + Math.floor(Math.random()*9000+1000));"
+            ] } },
+            { "listen": "test", "script": { "exec": [
+              "pm.test('create course returns 201', () => pm.response.to.have.status(201));",
+              "pm.test('create course body success', () => { var b = pm.response.json(); pm.expect(b.status).to.equal('success'); });",
+              "var b = pm.response.json(); if (b.data) { pm.environment.set('section_code', b.data.section_code || ''); pm.environment.set('course_id', String(b.data.id || '')); }"
+            ] } }
+          ],
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"section_code\":\"{{test_section_code}}\",\"course_code\":\"TESTCOURSE\",\"course_name\":\"Test Course\",\"teacher_code\":\"T001\",\"credits\":\"3\",\"schedule\":\"T2-(1-3)\",\"classroom\":\"501T5\",\"max_students\":\"30\"}" },
+            "url": { "raw": "{{base_url}}/course.php", "host": ["{{base_url}}"], "path": ["course.php"] }
+          }
+        },
+        {
+          "name": "Admin - List courses → 200",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/course.php", "host": ["{{base_url}}"], "path": ["course.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('course list returns 200', () => pm.response.to.have.status(200));"
+          ] } }]
+        },
+        {
+          "name": "Admin - Get course detail by ID → 200",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/course_detail.php?id={{course_id}}", "host": ["{{base_url}}"], "path": ["course_detail.php"], "query": [{"key":"id","value":"{{course_id}}"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('course detail returns 200', () => pm.response.to.have.status(200));",
+            "pm.test('course detail has success status', () => { var b = pm.response.json(); pm.expect(b.status).to.equal('success'); });"
+          ] } }]
+        }
+      ]
+    },
+
+    {
+      "name": "=== Part 5: Attendance - Validation errors ===",
+      "item": [
+        {
+          "name": "Attendance - create-lesson missing section_code → 400",
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{}" },
+            "url": { "raw": "{{base_url}}/course_detail.php?action=create-lesson", "host": ["{{base_url}}"], "path": ["course_detail.php"], "query": [{"key":"action","value":"create-lesson"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('create-lesson without section_code returns 400', () => { pm.expect(pm.response.code).to.be.oneOf([400, 404, 422]); });"
+          ] } }]
+        },
+        {
+          "name": "Attendance - get-attendance missing week_number → 400",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/course_detail.php?action=attendance&section_code={{section_code}}&week_number=0", "host": ["{{base_url}}"], "path": ["course_detail.php"], "query": [{"key":"action","value":"attendance"},{"key":"section_code","value":"{{section_code}}"},{"key":"week_number","value":"0"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('get-attendance with week_number=0 returns 400', () => { pm.expect(pm.response.code).to.be.oneOf([400, 422]); });"
+          ] } }]
+        },
+        {
+          "name": "Attendance - submit-attendance missing section_code → 400",
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"week_number\":1,\"attendance_list\":[]}" },
+            "url": { "raw": "{{base_url}}/course_detail.php?action=submit-attendance", "host": ["{{base_url}}"], "path": ["course_detail.php"], "query": [{"key":"action","value":"submit-attendance"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('submit-attendance without section_code returns 400', () => { pm.expect(pm.response.code).to.be.oneOf([400, 422]); });"
+          ] } }]
+        },
+        {
+          "name": "Attendance - submit-score missing student_code → 400",
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"section_code\":\"{{section_code}}\"}" },
+            "url": { "raw": "{{base_url}}/course_detail.php?action=submit-score", "host": ["{{base_url}}"], "path": ["course_detail.php"], "query": [{"key":"action","value":"submit-score"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('submit-score without student_code returns 400', () => { pm.expect(pm.response.code).to.be.oneOf([400, 422]); });"
+          ] } }]
+        }
+      ]
+    },
+
+    {
+      "name": "=== Part 6: Teacher login ===",
+      "item": [
+        {
+          "name": "Login - Teacher T001",
+          "request": { "method": "POST", "header": [], "body": { "mode": "urlencoded", "urlencoded": [{"key":"login_id","value":"{{teacher_code}}"},{"key":"password","value":"123456"}] },
+            "url": { "raw": "{{base_url}}/login.php", "host": ["{{base_url}}"], "path": ["login.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('teacher login returns 200', () => pm.response.to.have.status(200));",
+            "var b = pm.response.json(); if (b.status === 'success') { var c = pm.response.headers.get('Set-Cookie'); if (c) { var m = c.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_teacher', m[0]); } }"
+          ] } }]
+        },
+        {
+          "name": "Teacher - home returns account_type teacher",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_teacher}}"}],
+            "url": { "raw": "{{base_url}}/home.php", "host": ["{{base_url}}"], "path": ["home.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('teacher home returns 200 or 401', () => { pm.expect(pm.response.code).to.be.oneOf([200, 401]); });",
+            "if (pm.response.code === 200) { pm.test('teacher account_type is teacher', () => { var b = pm.response.json(); pm.expect(b.account_type).to.equal('teacher'); }); }"
+          ] } }]
+        }
+      ]
+    },
+
+    {
+      "name": "=== Part 7: Cleanup ===",
+      "item": [
+        {
+          "name": "Admin - Logout",
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/logout.php", "host": ["{{base_url}}"], "path": ["logout.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('logout returns 200 or 302', () => { pm.expect(pm.response.code).to.be.oneOf([200, 302]); });"
+          ] } }]
+        }
+      ]
+    }
+
+  ]
+}

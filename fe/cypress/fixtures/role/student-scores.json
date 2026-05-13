@@ -1,0 +1,11 @@
+[
+  {
+    "id": 401,
+    "course_code": "INT301",
+    "course_name": "Mang may tinh",
+    "credits": 3,
+    "teacher_name": "GV A",
+    "score": 8.5,
+    "letter": "A"
+  }
+]

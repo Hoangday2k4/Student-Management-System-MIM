@@ -122,6 +122,28 @@ class Faculty
                 TrangThai TEXT NOT NULL DEFAULT "Hoạt động"
             )'
         );
+        // GiangVien and Nganh are referenced by findByCode/searchWithStats; ensure they exist
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS GiangVien (
+                MaGV TEXT PRIMARY KEY,
+                HoTen TEXT NOT NULL,
+                GioiTinh TEXT,
+                NgaySinh TEXT,
+                Email TEXT UNIQUE NOT NULL,
+                SoDienThoai TEXT,
+                HocHamHocVi TEXT,
+                TrangThai TEXT
+            )'
+        );
+        $pdo->exec(
+            'CREATE TABLE IF NOT EXISTS Nganh (
+                MaNganh TEXT PRIMARY KEY,
+                TenNganh TEXT NOT NULL,
+                MaKhoa TEXT,
+                MoTa TEXT,
+                TrangThai TEXT NOT NULL DEFAULT "Đang đào tạo"
+            )'
+        );
 
         self::ensureColumn($pdo, 'Khoa', 'MoTa', 'TEXT');
         self::ensureColumn($pdo, 'Khoa', 'TruongKhoa', 'TEXT');
@@ -492,11 +514,12 @@ class Faculty
             throw new RuntimeException('Thiếu mã khoa cần xóa.');
         }
 
-        $classCount = self::countRefs($pdo, 'LopSinhHoat', 'MaNganh', $code);
+        $majorCount  = self::countRefs($pdo, 'Nganh', 'MaKhoa', $code);
+        $classCount  = self::countRefs($pdo, 'LopSinhHoat', 'MaNganh', $code);
         $teacherCount = self::countRefs($pdo, 'GiangVien', 'MaNganh', $code);
         $courseCount = self::countRefs($pdo, 'MonHoc', 'MaNganh', $code);
-        if ($classCount > 0 || $teacherCount > 0 || $courseCount > 0) {
-            throw new RuntimeException('Không thể xóa khoa vì vẫn còn lớp, giáo viên hoặc môn học đang liên kết.');
+        if ($majorCount > 0 || $classCount > 0 || $teacherCount > 0 || $courseCount > 0) {
+            throw new RuntimeException('Không thể xóa khoa vì vẫn còn ngành, lớp, giáo viên hoặc môn học đang liên kết.');
         }
 
         $stmt = $pdo->prepare('DELETE FROM Khoa WHERE lower(MaKhoa) = lower(:code)');

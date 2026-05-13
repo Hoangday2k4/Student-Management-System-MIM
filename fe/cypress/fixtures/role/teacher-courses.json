@@ -1,0 +1,12 @@
+[
+  {
+    "id": 201,
+    "course_code": "INT201",
+    "course_name": "Cau truc du lieu",
+    "credits": 3,
+    "schedule": "T2-(1-3)",
+    "classroom": "A1-101",
+    "teacher_name": "Test Teacher",
+    "teacher_code": "T001"
+  }
+]

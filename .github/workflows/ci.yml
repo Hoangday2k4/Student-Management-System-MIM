@@ -1,0 +1,246 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: Composer install (if configured)
+        shell: bash
+        run: |
+          if [ -f api/composer.json ]; then
+            rm -rf api/vendor
+            composer install --no-interaction --prefer-dist --optimize-autoloader --working-dir=api
+            composer dump-autoload -o --working-dir=api
+          else
+            echo "Skip Composer install (no composer.json)."
+          fi
+      - name: PHP Unit (if available)
+        shell: bash
+        run: |
+          if [ -x api/vendor/bin/phpunit ]; then
+            api/vendor/bin/phpunit -c api/phpunit.xml --testsuite API
+          else
+            echo "Skip PHP unit tests (phpunit not installed)."
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+      - name: FE Unit (if configured)
+        shell: bash
+        run: |
+          if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s['test:unit']?0:1)"; then
+            pnpm -C fe install
+            pnpm -C fe run test:unit
+          else
+            echo "Skip FE unit tests (no test:unit script)."
+          fi
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: Composer install (if configured)
+        shell: bash
+        run: |
+          if [ -f api/composer.json ]; then
+            rm -rf api/vendor
+            composer install --no-interaction --prefer-dist --optimize-autoloader --working-dir=api
+            composer dump-autoload -o --working-dir=api
+          else
+            echo "Skip Composer install (no composer.json)."
+          fi
+      - name: Integration (if configured)
+        shell: bash
+        run: |
+          if [ -f api/tests/integration/run.sh ]; then
+            bash api/tests/integration/run.sh
+          else
+            echo "Skip integration tests (no runner found)."
+          fi
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: E2E (Cypress/Selenium if configured)
+        shell: bash
+        env:
+          CI_TEST_MODE: "1"
+        run: |
+          if [ ! -f fe/package.json ]; then
+            echo "Skip E2E tests (no fe/package.json)."
+            exit 0
+          fi
+
+          TMP_E2E=$(mktemp -d)
+          mkdir -p "$TMP_E2E/sessions"
+          DB_PATH_OVERRIDE="$TMP_E2E/e2e.sqlite" \
+            php -d session.save_path="$TMP_E2E/sessions" \
+            -S 127.0.0.1:8001 -t api > /tmp/php-e2e-server.log 2>&1 &
+
+          pnpm -C fe install --frozen-lockfile
+          pnpm -C fe run dev -- --host 0.0.0.0 --port 5173 &
+          # Cypress tests mock all API calls via cy.intercept(); only Vite needs to be ready.
+          npx wait-on http://localhost:5173 --timeout 120000
+          pnpm -C fe run test:e2e
+
+  api-tests:
+    name: API Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: Composer install (if configured)
+        shell: bash
+        run: |
+          if [ -f api/composer.json ]; then
+            rm -rf api/vendor
+            composer install --no-interaction --prefer-dist --optimize-autoloader --working-dir=api
+            composer dump-autoload -o --working-dir=api
+          else
+            echo "Skip Composer install (no composer.json)."
+          fi
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Postman runner deps
+        working-directory: tests/postman
+        run: |
+          if [ -f package.json ]; then
+            npm install --no-fund --no-audit
+          else
+            echo "Skip Newman install (no package.json)"
+          fi
+      - name: Start PHP built-in server for API tests
+        shell: bash
+        env:
+          CI_TEST_MODE: "1"
+        run: |
+          TMP_SESSION=$(mktemp -d)
+          TMP_DB=$(mktemp -d)
+          echo "Session dir: $TMP_SESSION"
+          echo "Starting PHP server on 127.0.0.1:8001 with document root: api"
+          DB_PATH_OVERRIDE="$TMP_DB/api-test.sqlite" \
+            php -d session.save_path="$TMP_SESSION" -S 127.0.0.1:8001 -t api > /tmp/php-server.log 2>&1 &
+          SERVER_PID=$!
+          echo $SERVER_PID > /tmp/php-server.pid
+          echo "Started PHP server - PID $SERVER_PID"
+          sleep 2
+          if ! ps -p $SERVER_PID > /dev/null; then
+            echo "ERROR: PHP server process died"
+            cat /tmp/php-server.log
+            exit 1
+          fi
+          echo "PHP server process is running"
+      - name: Wait for API server to be ready
+        shell: bash
+        run: |
+          SERVER_PID=$(cat /tmp/php-server.pid)
+          echo "Checking if server (PID $SERVER_PID) is responding..."
+          for i in {1..30}; do
+            if ps -p $SERVER_PID > /dev/null 2>&1; then
+              if curl -sS -o /dev/null http://127.0.0.1:8001/get_config.php 2>/dev/null; then
+                echo "✓ API server ready at http://127.0.0.1:8001"
+                exit 0
+              fi
+            else
+              echo "ERROR: Server process $SERVER_PID died"
+              [ -f /tmp/php-server.log ] && cat /tmp/php-server.log
+              exit 1
+            fi
+            echo "Waiting for API server... ($i/30)"
+            sleep 1
+          done
+          echo "ERROR: API server did not respond after 30 seconds" >&2
+          [ -f /tmp/php-server.log ] && cat /tmp/php-server.log
+          exit 1
+      - name: Run Newman with retry
+        working-directory: tests/postman
+        shell: bash
+        run: |
+          if [ ! -f collections/student-management-api.postman_collection.json ]; then
+            echo "Skip API tests (no Postman collection)."
+            exit 0
+          fi
+
+          npm test
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: postman-reports
+          path: tests/postman/reports
+
+  static-analysis:
+    name: Static Code Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+      - name: Composer install (if configured)
+        shell: bash
+        run: |
+          if [ -f api/composer.json ]; then
+            rm -rf api/vendor
+            composer install --no-interaction --prefer-dist --optimize-autoloader --working-dir=api
+            composer dump-autoload -o --working-dir=api
+          else
+            echo "Skip Composer install (no composer.json)."
+          fi
+      - name: PHP syntax check
+        shell: bash
+        run: |
+          find api -name "*.php" -not -path "*/vendor/*" -print0 | xargs -0 -n 1 php -l
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: pnpm/action-setup@v4
+        with:
+          version: "9"
+      - name: ESLint (if configured)
+        shell: bash
+        run: |
+          if [ -f fe/package.json ] && node -e "const s=require('./fe/package.json').scripts||{};process.exit(s.lint?0:1)"; then
+            pnpm -C fe install --frozen-lockfile
+            pnpm -C fe run lint
+          else
+            echo "Skip ESLint (no lint script)."
+          fi
+      - name: SonarQube (optional)
+        if: env.SONAR_TOKEN != ''
+        continue-on-error: true
+        uses: sonarsource/sonarqube-scan-action@v2.0.2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

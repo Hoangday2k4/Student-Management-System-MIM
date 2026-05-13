@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 require_once __DIR__ . '/../models/Course.php';
 require_once __DIR__ . '/../models/Teacher.php';
 require_once __DIR__ . '/../models/Student.php';
@@ -35,9 +35,20 @@ class CourseController
             ];
         }
 
+        $courses = [];
+        $courseRows = $pdo->query('SELECT MaMon, TenMon, SoTinChi FROM MonHoc ORDER BY MaMon ASC')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        foreach ($courseRows as $row) {
+            $courses[] = [
+                'course_code' => trim((string)($row['MaMon'] ?? '')),
+                'course_name' => trim((string)($row['TenMon'] ?? '')),
+                'credits' => trim((string)($row['SoTinChi'] ?? '')),
+            ];
+        }
+
         return [
             'departments' => $departments,
             'teachers' => $teachers,
+            'courses' => $courses,
         ];
     }
 
@@ -136,6 +147,32 @@ class CourseController
         return $slots;
     }
 
+    private function findTeacherConflict(PDO $pdo, string $scheduleRaw, string $teacherCode, ?int $excludeCourseId = null): ?array
+    {
+        if ($teacherCode === '' || $scheduleRaw === '') return null;
+        $newSlots = $this->buildScheduleSlots($scheduleRaw, '');
+        if (empty($newSlots)) return null;
+
+        $rows = Course::searchForStaff(['teacher_code' => $teacherCode]);
+        if ($excludeCourseId !== null && $excludeCourseId > 0) {
+            $rows = array_values(array_filter($rows, static function ($row) use ($excludeCourseId) {
+                return (int)($row['id'] ?? 0) !== $excludeCourseId;
+            }));
+        }
+        foreach ($rows as $row) {
+            $existingSlots = $this->buildScheduleSlots((string)($row['schedule'] ?? ''), '');
+            foreach ($newSlots as $newSlot) {
+                foreach ($existingSlots as $oldSlot) {
+                    if ((int)$newSlot['day'] !== (int)$oldSlot['day']) continue;
+                    if ($this->intervalsOverlap((int)$newSlot['start'], (int)$newSlot['end'], (int)$oldSlot['start'], (int)$oldSlot['end'])) {
+                        return ['course_code' => (string)($row['course_code'] ?? ''), 'day' => (int)$newSlot['day'], 'start' => (int)$newSlot['start'], 'end' => (int)$newSlot['end']];
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     private function findClassroomConflict(PDO $pdo, string $scheduleRaw, string $classroomRaw, ?int $excludeCourseId = null): ?array
     {
         $newSlots = $this->buildScheduleSlots($scheduleRaw, $classroomRaw);
@@ -227,22 +264,20 @@ class CourseController
     private function extractStudentCodesFromTableRows(array $rows): array
     {
         if (count($rows) < 2) {
-            return [[], 'File danh sach sinh vien khong co du lieu.', []];
+            return [[], 'File danh sách sinh viên không có dữ liệu.', []];
         }
 
         $headers = $rows[0];
         $headerMap = [];
+        
         $headerAlias = [
-            'student_code' => ['mssv', 'studentcode', 'student_code', 'masosinhvien', 'masv'],
-            'full_name' => ['hoten', 'hten', 'fullname', 'tensinhvien'],
-            'date_of_birth' => ['ngaysinh', 'ngysinh', 'dateofbirth', 'dob'],
-            'gender' => ['gioitinh', 'gitinh', 'gender'],
-            'class_name' => ['lop', 'lp', 'classname'],
+            'student_code' => ['mssv', 'studentcode', 'student_code', 'masosinhvien', 'masv', 'ma'],
         ];
 
         foreach ($headers as $index => $label) {
             $normalized = $this->normalizeHeader((string)$label);
             if ($normalized === '') continue;
+            
             foreach ($headerAlias as $field => $aliases) {
                 if (in_array($normalized, $aliases, true) && !isset($headerMap[$field])) {
                     $headerMap[$field] = (int)$index;
@@ -251,26 +286,9 @@ class CourseController
             }
         }
 
-        // Fallback by fixed column order to tolerate mojibake/accent stripping in CSV headers.
-        if (count($headers) >= 5) {
-            $defaultMap = [
-                'student_code' => 0,
-                'full_name' => 1,
-                'date_of_birth' => 2,
-                'gender' => 3,
-                'class_name' => 4,
-            ];
-            foreach ($defaultMap as $field => $position) {
-                if (!isset($headerMap[$field])) {
-                    $headerMap[$field] = $position;
-                }
-            }
-        }
-
-        foreach (['student_code', 'full_name', 'date_of_birth', 'gender', 'class_name'] as $requiredField) {
-            if (!isset($headerMap[$requiredField])) {
-                return [[], 'File danh sach sinh vien phai co du 5 cot: MSSV, Ho ten, Ngay sinh, Gioi tinh, Lop.', []];
-            }
+        // CHỈ KIỂM TRA MỖI CỘT MSSV
+        if (!isset($headerMap['student_code'])) {
+            return [[], 'File bắt buộc phải có cột Mã số sinh viên (MSSV). Vui lòng kiểm tra lại.', []];
         }
 
         $codes = [];
@@ -278,20 +296,17 @@ class CourseController
         $totalRows = 0;
         $invalidRows = 0;
         $duplicateRows = 0;
+        
         for ($i = 1; $i < count($rows); $i++) {
-            $line = $i + 1;
             $source = $rows[$i];
             $studentCode = trim((string)($source[$headerMap['student_code']] ?? ''));
-            $fullName = trim((string)($source[$headerMap['full_name']] ?? ''));
-            $dateOfBirth = trim((string)($source[$headerMap['date_of_birth']] ?? ''));
-            $gender = trim((string)($source[$headerMap['gender']] ?? ''));
-            $className = trim((string)($source[$headerMap['class_name']] ?? ''));
 
-            if ($studentCode === '' && $fullName === '' && $dateOfBirth === '' && $gender === '' && $className === '') {
+            if (empty(array_filter($source, 'trim'))) {
                 continue;
             }
             $totalRows++;
-            if ($studentCode === '' || $fullName === '' || $dateOfBirth === '' || $gender === '' || $className === '') {
+            
+            if ($studentCode === '') {
                 $invalidRows++;
                 continue;
             }
@@ -306,7 +321,7 @@ class CourseController
         }
 
         if (empty($codes)) {
-            return [[], 'File danh sach sinh vien khong co dong hop le.', [
+            return [[], 'File không có mã sinh viên nào hợp lệ để thêm vào lớp.', [
                 'total_rows' => $totalRows,
                 'valid_rows' => 0,
                 'invalid_rows' => $invalidRows,
@@ -325,17 +340,17 @@ class CourseController
     private function parseStudentCodesFromFile(array $file): array
     {
         if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            return [[], 'KhĂ´ng thá»ƒ Ä‘á»c file danh sĂ¡ch sinh viĂªn.', []];
+            return [[], 'Không thể đọc file danh sách sinh viên.', []];
         }
 
         $ext = strtolower(pathinfo((string)($file['name'] ?? ''), PATHINFO_EXTENSION));
         if ($ext === 'xls') {
-            return [[], 'File .xls chua ho tro. Hay luu duoi dang .xlsx hoac .csv roi tai len.', []];
+            return [[], 'File .xls chưa hỗ trợ. Hay lưu dưới dạng .xlsx hoặc .csv rồi tải lên.', []];
         }
 
         $tmp = (string)($file['tmp_name'] ?? '');
         if ($tmp === '' || !is_file($tmp)) {
-            return [[], 'KhĂ´ng tĂ¬m tháº¥y file táº£i lĂªn.', []];
+            return [[], 'Không tìm thấy file tải lên.', []];
         }
 
         try {
@@ -346,7 +361,7 @@ class CourseController
             }
             return $this->extractStudentCodesFromTableRows($rawRows);
         } catch (Throwable $e) {
-            return [[], 'KhĂ´ng Ä‘á»c Ä‘Æ°á»£c dá»¯ liá»‡u file danh sĂ¡ch sinh viĂªn.', []];
+            return [[], 'Không thể đọc được dữ liệu file danh sách sinh viên.', []];
         }
     }
 
@@ -367,17 +382,25 @@ class CourseController
 
     private function parseCsvRows(string $filePath): array
     {
+        $content = file_get_contents($filePath);
+        if ($content === false) return [];
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content);
+        $content = str_replace(["\r\n", "\r"], "\n", $content);
+        $lines = explode("\n", $content);
         $rows = [];
-        $handle = fopen($filePath, 'rb');
-        if (!$handle) return $rows;
-        while (($data = fgetcsv($handle)) !== false) {
-            $row = [];
-            foreach ($data as $cell) {
-                $row[] = trim((string)$cell);
-            }
-            $rows[] = $row;
+        if (empty($lines)) return $rows;
+        $firstLine = $lines[0];
+        $delimiter = ',';
+        if (substr_count($firstLine, ';') > substr_count($firstLine, ',')) {
+            $delimiter = ';';
+        } elseif (substr_count($firstLine, "\t") > substr_count($firstLine, ',')) {
+            $delimiter = "\t";
         }
-        fclose($handle);
+        foreach ($lines as $line) {
+            if (trim($line) === '') continue;
+            $row = str_getcsv($line, $delimiter, '"', '');
+            $rows[] = array_map('trim', $row);
+        }
         return $rows;
     }
 
@@ -400,7 +423,7 @@ class CourseController
         }
         $zip = new ZipArchive();
         if ($zip->open($filePath) !== true) {
-            throw new RuntimeException('KhĂ´ng má»Ÿ Ä‘Æ°á»£c file xlsx.');
+            throw new RuntimeException('Không thể mở file xlsx.');
         }
 
         $sharedStrings = [];
@@ -454,7 +477,7 @@ class CourseController
         $sheetRaw = $zip->getFromName($sheetPath);
         if ($sheetRaw === false) {
             $zip->close();
-            throw new RuntimeException('KhĂ´ng Ä‘á»c Ä‘Æ°á»£c dá»¯ liá»‡u worksheet.');
+            throw new RuntimeException('Không thể đọc được dữ liệu worksheet.');
         }
         $sheetXml = @simplexml_load_string($sheetRaw);
         if (!$sheetXml || !isset($sheetXml->sheetData->row)) {
@@ -704,6 +727,13 @@ class CourseController
     {
         $raw = strtoupper(trim($value));
         if ($raw === '') return null;
+        
+        // Check directly for Vietnamese semester terms
+        $lowerValue = mb_strtolower(trim($value), 'UTF-8');
+        if (in_array($lowerValue, ['kì i', 'ki i', 'học kỳ i', 'hoc ky i', '1', 'i'], true)) return 1;
+        if (in_array($lowerValue, ['kì ii', 'ki ii', 'học kỳ ii', 'hoc ky ii', '2', 'ii'], true)) return 2;
+        if (in_array($lowerValue, ['kì hè', 'ki he', 'kỳ hè', 'ky he', 'học kỳ hè', 'hoc ky he', '3', 'he', 'hè'], true)) return 3;
+        
         $ascii = $raw;
         if (function_exists('iconv')) {
             $converted = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $ascii);
@@ -834,38 +864,46 @@ class CourseController
         $sectionCode = strtoupper(trim((string)($payload['section_code'] ?? '')));
         $courseCode = strtoupper(trim((string)($payload['course_code'] ?? '')));
         $teacherCode = trim((string)($payload['teacher_code'] ?? ''));
-        $semesterTerm = trim((string)($payload['semester_term'] ?? ''));
+        $semesterTerm = trim((string)($payload['semester_term'] ?? ($payload['semester'] ?? '')));
         $academicYear = trim((string)($payload['academic_year'] ?? ''));
+        $departmentCode = trim((string)($payload['department'] ?? ''));
         $maxStudentsRaw = trim((string)($payload['max_students'] ?? ''));
 
-        if ($sectionCode === '') throw new RuntimeException('Thiáº¿u mĂ£ há»c pháº§n.');
-        if (!preg_match('/^[A-Z0-9._-]{3,30}$/', $sectionCode)) throw new RuntimeException('MĂ£ há»c pháº§n khĂ´ng há»£p lá»‡.');
-        if ($courseCode === '') throw new RuntimeException('Thiáº¿u mĂ£ mĂ´n.');
-        if ($teacherCode === '') throw new RuntimeException('Thiáº¿u mĂ£ giáº£ng viĂªn.');
-        if ($academicYear === '' || !preg_match('/^\d{4}\s*-\s*\d{4}$/', $academicYear)) throw new RuntimeException('NÄƒm há»c khĂ´ng há»£p lá»‡.');
-        if ($maxStudentsRaw === '' || !ctype_digit($maxStudentsRaw) || (int)$maxStudentsRaw <= 0) throw new RuntimeException('Sá»‘ lÆ°á»£ng tá»‘i Ä‘a pháº£i lĂ  sá»‘ nguyĂªn dÆ°Æ¡ng.');
+        if ($sectionCode === '') throw new RuntimeException('Thiếu mã học phần.');
+        if (!preg_match('/^[A-Z0-9._-]{3,30}$/', $sectionCode)) throw new RuntimeException('Mã học phần không hợp lệ.');
+        if ($courseCode === '') throw new RuntimeException('Thiếu mã môn.');
+        if ($teacherCode === '') throw new RuntimeException('Thiếu mã giảng viên.');
+        if ($academicYear === '' || !preg_match('/^\d{4}\s*-\s*\d{4}$/', $academicYear)) throw new RuntimeException('Năm học không hợp lệ.');
+        if ($maxStudentsRaw === '' || !ctype_digit($maxStudentsRaw) || (int)$maxStudentsRaw <= 0) throw new RuntimeException('Số lượng tối đa phải là số nguyên dương.');
 
         $semester = $this->normalizeSemesterTerm($semesterTerm);
-        if ($semester === null) throw new RuntimeException('Há»c ká»³ chá»‰ nháº­n I, II hoáº·c Ká»³ hĂ¨.');
+        if ($semester === null) throw new RuntimeException('Học kỳ chỉ nhận I, II hoặc Kỳ hè.');
 
         $existsSection = $pdo->prepare('SELECT 1 FROM LopHocPhan WHERE upper(MaLHP) = :ma_lhp LIMIT 1');
         $existsSection->execute([':ma_lhp' => $sectionCode]);
-        if ($existsSection->fetchColumn()) throw new RuntimeException('MĂ£ há»c pháº§n Ä‘Ă£ tá»“n táº¡i.');
+        if ($existsSection->fetchColumn()) throw new RuntimeException('Mã học phần đã tồn tại.');
 
-        $subject = Course::findSubjectByCode($courseCode);
-        if (!$subject) throw new RuntimeException('KhĂ´ng tĂ¬m tháº¥y mĂ£ mĂ´n há»c.');
+        // SỬA Ở ĐÂY: Truy vấn trực tiếp bằng $pdo đang có sẵn thay vì gọi hàm tạo kết nối mới
+        $stmtSubj = $pdo->prepare('SELECT TenMon, SoTinChi FROM MonHoc WHERE upper(MaMon) = :ma LIMIT 1');
+        $stmtSubj->execute([':ma' => $courseCode]);
+        $subject = $stmtSubj->fetch(PDO::FETCH_ASSOC);
+        if (!$subject) throw new RuntimeException('Không tìm thấy mã môn học.');
 
-        $teacher = Teacher::findByTeacherCode($teacherCode);
-        if (!$teacher) throw new RuntimeException('KhĂ´ng tĂ¬m tháº¥y mĂ£ giáº£ng viĂªn.');
+        // SỬA Ở ĐÂY: Truy vấn trực tiếp bằng $pdo
+        $stmtTeacher = $pdo->prepare('SELECT HoTen FROM GiangVien WHERE MaGV = :ma LIMIT 1');
+        $stmtTeacher->execute([':ma' => $teacherCode]);
+        $teacher = $stmtTeacher->fetch(PDO::FETCH_ASSOC);
+        if (!$teacher) throw new RuntimeException('Không tìm thấy mã giảng viên.');
 
         $ins = $pdo->prepare(
-            'INSERT INTO LopHocPhan (MaLHP, MaMon, MaGV, HocKy, NamHoc, SoLuongToiDa, TrongSoCC, TrongSoGK, TrongSoCK, CreatedAt)
-             VALUES (:ma_lhp, :ma_mon, :ma_gv, :hoc_ky, :nam_hoc, :max, 0, 0, 0, CURRENT_TIMESTAMP)'
+            'INSERT INTO LopHocPhan (MaLHP, MaMon, MaGV, MaKhoa, HocKy, NamHoc, SoLuongToiDa, TrongSoCC, TrongSoGK, TrongSoCK, CreatedAt)
+             VALUES (:ma_lhp, :ma_mon, :ma_gv, :ma_khoa, :hoc_ky, :nam_hoc, :max, 0, 0, 0, CURRENT_TIMESTAMP)'
         );
         $ins->execute([
             ':ma_lhp' => $sectionCode,
             ':ma_mon' => $courseCode,
             ':ma_gv' => $teacherCode,
+            ':ma_khoa' => $departmentCode ?: null,
             ':hoc_ky' => $semester,
             ':nam_hoc' => $academicYear,
             ':max' => (int)$maxStudentsRaw,
@@ -881,10 +919,10 @@ class CourseController
             'id' => $id,
             'section_code' => $sectionCode,
             'course_code' => $courseCode,
-            'course_name' => (string)($subject['course_name'] ?? ''),
-            'credits' => (int)($subject['credits'] ?? 0),
+            'course_name' => (string)($subject['TenMon'] ?? ''), // Đổi key cho khớp CSDL
+            'credits' => (int)($subject['SoTinChi'] ?? 0),       // Đổi key cho khớp CSDL
             'teacher_code' => $teacherCode,
-            'teacher_name' => (string)($teacher['full_name'] ?? ''),
+            'teacher_name' => (string)($teacher['HoTen'] ?? ''), // Đổi key cho khớp CSDL
             'semester' => $semester,
             'semester_label' => $this->semesterLabelFromInt($semester),
             'academic_year' => $academicYear,
@@ -894,39 +932,47 @@ class CourseController
 
     private function updateSectionLiteWithPdo(PDO $pdo, int $id, array $payload): array
     {
-        if ($id <= 0) throw new RuntimeException('Thiáº¿u mĂ£ há»c pháº§n.');
+        if ($id <= 0) throw new RuntimeException('Thiếu mã học phần.');
 
         $sectionCode = trim((string)($payload['section_code'] ?? ''));
         $courseCode = strtoupper(trim((string)($payload['course_code'] ?? '')));
         $teacherCode = trim((string)($payload['teacher_code'] ?? ''));
         $semesterTerm = trim((string)($payload['semester_term'] ?? ''));
         $academicYear = trim((string)($payload['academic_year'] ?? ''));
+        $departmentCode = trim((string)($payload['department'] ?? ''));
         $maxStudentsRaw = trim((string)($payload['max_students'] ?? ''));
 
-        if ($sectionCode === '') throw new RuntimeException('Thiáº¿u mĂ£ há»c pháº§n.');
-        if ($courseCode === '') throw new RuntimeException('Thiáº¿u mĂ£ mĂ´n.');
-        if ($teacherCode === '') throw new RuntimeException('Thiáº¿u mĂ£ giáº£ng viĂªn.');
-        if ($academicYear === '' || !preg_match('/^\d{4}\s*-\s*\d{4}$/', $academicYear)) throw new RuntimeException('NÄƒm há»c khĂ´ng há»£p lá»‡.');
-        if ($maxStudentsRaw === '' || !ctype_digit($maxStudentsRaw) || (int)$maxStudentsRaw <= 0) throw new RuntimeException('Sá»‘ lÆ°á»£ng tá»‘i Ä‘a pháº£i lĂ  sá»‘ nguyĂªn dÆ°Æ¡ng.');
+        if ($sectionCode === '') throw new RuntimeException('Thiếu mã học phần.');
+        if ($courseCode === '') throw new RuntimeException('Thiếu mã môn.');
+        if ($teacherCode === '') throw new RuntimeException('Thiếu mã giảng viên.');
+        if ($academicYear === '' || !preg_match('/^\d{4}\s*-\s*\d{4}$/', $academicYear)) throw new RuntimeException('Năm học không hợp lệ.');
+        if ($maxStudentsRaw === '' || !ctype_digit($maxStudentsRaw) || (int)$maxStudentsRaw <= 0) throw new RuntimeException('Số lượng tối đa phải là số nguyên dương.');
 
         $semester = $this->normalizeSemesterTerm($semesterTerm);
-        if ($semester === null) throw new RuntimeException('Há»c ká»³ chá»‰ nháº­n I, II hoáº·c Ká»³ hĂ¨.');
+        if ($semester === null) throw new RuntimeException('Học kỳ chỉ nhận I, II hoặc Kỳ hè.');
 
-        $subject = Course::findSubjectByCode($courseCode);
-        if (!$subject) throw new RuntimeException('KhĂ´ng tĂ¬m tháº¥y mĂ£ mĂ´n há»c.');
+        // FIX: Truy vấn trực tiếp bằng $pdo đang có sẵn
+        $stmtSubj = $pdo->prepare('SELECT TenMon, SoTinChi FROM MonHoc WHERE upper(MaMon) = :ma LIMIT 1');
+        $stmtSubj->execute([':ma' => $courseCode]);
+        $subject = $stmtSubj->fetch(PDO::FETCH_ASSOC);
+        if (!$subject) throw new RuntimeException('Không tìm thấy mã môn học.');
 
-        $teacher = Teacher::findByTeacherCode($teacherCode);
-        if (!$teacher) throw new RuntimeException('KhĂ´ng tĂ¬m tháº¥y mĂ£ giáº£ng viĂªn.');
+        // FIX: Truy vấn trực tiếp bằng $pdo đang có sẵn
+        $stmtTeacher = $pdo->prepare('SELECT HoTen FROM GiangVien WHERE MaGV = :ma LIMIT 1');
+        $stmtTeacher->execute([':ma' => $teacherCode]);
+        $teacher = $stmtTeacher->fetch(PDO::FETCH_ASSOC);
+        if (!$teacher) throw new RuntimeException('Không tìm thấy mã giảng viên.');
 
         $stmtMap = $pdo->prepare('SELECT MaLHP FROM LopHocPhanMap WHERE LegacyId = :id LIMIT 1');
         $stmtMap->execute([':id' => $id]);
         $maLhp = (string)$stmtMap->fetchColumn();
-        if ($maLhp === '') throw new RuntimeException('KhĂ´ng tĂ¬m tháº¥y lá»›p há»c pháº§n.');
+        if ($maLhp === '') throw new RuntimeException('Không tìm thấy lớp học phần.');
 
         $up = $pdo->prepare(
             'UPDATE LopHocPhan
              SET MaMon = :ma_mon,
                  MaGV = :ma_gv,
+                 MaKhoa = :ma_khoa,
                  HocKy = :hoc_ky,
                  NamHoc = :nam_hoc,
                  SoLuongToiDa = :max
@@ -935,6 +981,7 @@ class CourseController
         $up->execute([
             ':ma_mon' => $courseCode,
             ':ma_gv' => $teacherCode,
+            ':ma_khoa' => $departmentCode ?: null,
             ':hoc_ky' => $semester,
             ':nam_hoc' => $academicYear,
             ':max' => (int)$maxStudentsRaw,
@@ -945,10 +992,10 @@ class CourseController
             'id' => $id,
             'section_code' => $maLhp,
             'course_code' => $courseCode,
-            'course_name' => (string)($subject['course_name'] ?? ''),
-            'credits' => (int)($subject['credits'] ?? 0),
+            'course_name' => (string)($subject['TenMon'] ?? ''),
+            'credits' => (int)($subject['SoTinChi'] ?? 0),
             'teacher_code' => $teacherCode,
-            'teacher_name' => (string)($teacher['full_name'] ?? ''),
+            'teacher_name' => (string)($teacher['HoTen'] ?? ''),
             'semester' => $semester,
             'semester_label' => $this->semesterLabelFromInt($semester),
             'academic_year' => $academicYear,
@@ -983,7 +1030,7 @@ class CourseController
             } else {
                 $credits = (int)$creditsRaw;
                 if ($credits <= 0) {
-                    $errors['credits'] = 'SĂ¡Â»â€˜ tÄ‚Â­n chĂ¡Â»â€° phĂ¡ÂºÂ£i lĂ¡Â»â€ºn hĂ†Â¡n 0.';
+                    $errors['credits'] = 'Số tín chỉ phải lớn hơn 0.';
                 }
             }
         }
@@ -995,7 +1042,7 @@ class CourseController
             } else {
                 $maxStudents = (int)$maxStudentsRaw;
                 if ($maxStudents <= 0) {
-                    $errors['max_students'] = 'SĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng tĂ¡Â»â€˜i Ă„â€˜a phĂ¡ÂºÂ£i lĂ¡Â»â€ºn hĂ†Â¡n 0.';
+                    $errors['max_students'] = 'Số lượng tối đa phải lớn hơn 0.';
                 }
             }
         }
@@ -1026,7 +1073,7 @@ class CourseController
         if ($schedule !== '') {
             $scheduleItems = $this->splitMultiValues($schedule);
             foreach ($scheduleItems as $scheduleItem) {
-                if (!preg_match('/^T([2-7])-\((\d{1,2})-(\d{1,2})\)$/u', strtoupper($scheduleItem), $m)) {
+                if (!preg_match('/^T([2-8])-\((\d{1,2})-(\d{1,2})\)$/u', strtoupper($scheduleItem), $m)) {
                     $errors['schedule'] = 'LĂ¡Â»â€¹ch hĂ¡Â»Âc phĂ¡ÂºÂ£i Ă„â€˜Ä‚Âºng dĂ¡ÂºÂ¡ng T2-(1-3), cÄ‚Â³ thĂ¡Â»Æ’ nhiĂ¡Â»Âu giÄ‚Â¡ trĂ¡Â»â€¹ ngĂ„Æ’n cÄ‚Â¡ch bĂ¡Â»Å¸i dĂ¡ÂºÂ¥u phĂ¡ÂºÂ©y.';
                     break;
                 }
@@ -1070,10 +1117,10 @@ class CourseController
                     $teacher = Teacher::findByTeacherCode($teacherCode);
                 }
                 if (!$teacher) {
-                    $errors['teacher_code'] = 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y giÄ‚Â¡o viÄ‚Âªn theo mÄ‚Â£ Ă„â€˜Ä‚Â£ nhĂ¡ÂºÂ­p.';
+                    $errors['teacher_code'] = 'Không tìm thấy giáo viên theo mã được nhập.';
                 }
             } catch (Throwable $e) {
-                $errors['teacher_code'] = 'KhÄ‚Â´ng kiĂ¡Â»Æ’m tra Ă„â€˜Ă†Â°Ă¡Â»Â£c mÄ‚Â£ giÄ‚Â¡o viÄ‚Âªn lÄ‚Âºc nÄ‚Â y. Vui lÄ‚Â²ng thĂ¡Â»Â­ lĂ¡ÂºÂ¡i.';
+                $errors['teacher_code'] = 'Không thể kiểm tra mã giáo viên lúc này. Vui lòng thử lại.';
             }
         }
 
@@ -1155,7 +1202,7 @@ class CourseController
                 Teacher::ensureSchema($pdo);
                 jsonResponse(['status' => 'success', 'data' => $this->createMeta($pdo)]);
             } catch (Throwable $e) {
-                jsonResponse(['status' => 'error', 'message' => 'KhĂ´ng táº£i Ä‘Æ°á»£c dá»¯ liá»‡u táº¡o lá»›p há»c.', 'detail' => $e->getMessage()], 500);
+                jsonResponse(['status' => 'error', 'message' => 'Không thể tải được dữ liệu tạo lớp học.', 'detail' => $e->getMessage()], 500);
             }
             return;
         }
@@ -1167,7 +1214,7 @@ class CourseController
                 if ($code !== '') {
                     $subject = Course::findSubjectByCode($code);
                     if (!$subject) {
-                        jsonResponse(['status' => 'error', 'message' => 'KhĂ´ng tĂ¬m tháº¥y mĂ´n há»c.'], 404);
+                        jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy môn học.'], 404);
                         return;
                     }
                     jsonResponse(['status' => 'success', 'data' => $subject]);
@@ -1225,7 +1272,7 @@ class CourseController
 
         $mode = strtolower(trim((string)($_GET['mode'] ?? ($payload['mode'] ?? ''))));
         if ($mode === 'subject-update') {
-            $originalCode = strtoupper(trim((string)($payload['original_code'] ?? '')));
+            $originalCode = strtoupper(trim((string)($payload['original_code'] ?? $payload['course_code'] ?? '')));
             if ($originalCode === '') {
                 jsonResponse(['status' => 'error', 'message' => 'Thiáº¿u mĂ£ mĂ´n há»c gá»‘c.'], 422);
                 return;
@@ -1244,7 +1291,7 @@ class CourseController
                 return;
             } catch (Throwable $e) {
                 if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
-                jsonResponse(['status' => 'error', 'message' => 'KhĂ´ng thá»ƒ cáº­p nháº­t mĂ´n há»c.', 'detail' => $e->getMessage()], 500);
+                jsonResponse(['status' => 'error', 'message' => 'Không thể cập nhật môn học.', 'detail' => $e->getMessage()], 500);
                 return;
             }
         }
@@ -1336,10 +1383,12 @@ class CourseController
                 return;
             }
 
+           
+
             $roomConflict = $this->findClassroomConflict($pdo, (string)($data['schedule'] ?? ''), (string)($data['classroom'] ?? ''), null);
             if ($roomConflict) {
                 $msg = sprintf(
-                    'TrĂ¹ng phĂ²ng há»c vá»›i lá»›p %s (T%s-(%s-%s), phĂ²ng %s).',
+                    'Trùng phòng học với lớp %s (T%s-(%s-%s), phòng %s).',
                     $roomConflict['course_code'],
                     $roomConflict['day'],
                     $roomConflict['start'],
@@ -1366,22 +1415,14 @@ class CourseController
         } catch (PDOException $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
             $msg = (string)$e->getMessage();
-            if (strpos($msg, 'UNIQUE constraint failed: MonHoc.MaMon') !== false) {
-                jsonResponse([
-                    'status' => 'error',
-                    'message' => 'MÄ‚Â£ mÄ‚Â´n hĂ¡Â»Âc Ă„â€˜Ä‚Â£ tĂ¡Â»â€œn tĂ¡ÂºÂ¡i.',
-                    'fields' => ['course_code' => 'MÄ‚Â£ mÄ‚Â´n hĂ¡Â»Âc Ă„â€˜Ä‚Â£ tĂ¡Â»â€œn tĂ¡ÂºÂ¡i.'],
-                ], 409);
-                return;
-            }
-            jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng thĂ¡Â»Æ’ tĂ¡ÂºÂ¡o lĂ¡Â»â€ºp hĂ¡Â»Âc.', 'detail' => $msg], 500);
+            jsonResponse(['status' => 'error', 'message' => 'Không thể tạo lớp học.', 'detail' => $msg], 500);
         } catch (Throwable $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
-            jsonResponse(['status' => 'error', 'message' => 'LĂ¡Â»â€”i hĂ¡Â»â€¡ thĂ¡Â»â€˜ng.', 'detail' => $e->getMessage()], 500);
+            jsonResponse(['status' => 'error', 'message' => 'Lỗi hệ thống.', 'detail' => $e->getMessage()], 500);
         }
     }
 
-    public function delete()
+   public function delete()
     {
         $identity = $this->currentIdentity();
         if (!$identity) {
@@ -1401,7 +1442,7 @@ class CourseController
         if ($mode === 'subject') {
             $courseCode = trim((string)($_GET['code'] ?? ''));
             if ($courseCode === '') {
-                jsonResponse(['status' => 'error', 'message' => 'Thiáº¿u mĂ£ mĂ´n há»c.'], 422);
+                jsonResponse(['status' => 'error', 'message' => 'Thiếu mã môn học.'], 422);
                 return;
             }
             try {
@@ -1412,7 +1453,7 @@ class CourseController
                 $pdo->commit();
                 jsonResponse([
                     'status' => 'success',
-                    'message' => 'ÄĂ£ xĂ³a mĂ´n há»c thĂ nh cĂ´ng.',
+                    'message' => 'Đã xóa môn học thành công.',
                     'data' => ['course_code' => strtoupper($courseCode)],
                 ]);
                 return;
@@ -1421,27 +1462,28 @@ class CourseController
                 jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 422);
                 return;
             } catch (Throwable $e) {
-                if (isset($pdo) && $pdo->inTransaction()) {
-                    $pdo->rollBack();
-                }
-                jsonResponse(['status' => 'error', 'message' => 'KhĂ´ng thá»ƒ xĂ³a mĂ´n há»c.', 'detail' => $e->getMessage()], 500);
+                if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+                jsonResponse(['status' => 'error', 'message' => 'Không thể xóa môn học.', 'detail' => $e->getMessage()], 500);
                 return;
             }
         }
 
-        $courseId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
-        if ($courseId <= 0) {
-            jsonResponse(['status' => 'error', 'message' => 'Thiáº¿u mĂ£ mĂ´n há»c.'], 422);
-            return;
-        }
+        // Hỗ trợ nhận ID từ cả URL ($_GET) và JSON Payload Body cho Axios
+        $payload = $this->parseJsonPayload();
+        $courseId = (int)($_GET['id'] ?? $payload['id'] ?? 0);
 
-        $course = Course::findById($courseId);
-        if (!$course) {
-            jsonResponse(['status' => 'error', 'message' => 'KhĂ´ng tĂ¬m tháº¥y mĂ´n há»c.'], 404);
+        if ($courseId <= 0) {
+            jsonResponse(['status' => 'error', 'message' => 'Thiếu mã lớp học phần.'], 422);
             return;
         }
 
         try {
+            $course = Course::findById($courseId);
+            if (!$course) {
+                jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy lớp học phần.'], 404);
+                return;
+            }
+
             $pdo = get_db_connection();
             Course::ensureSchema($pdo);
             $pdo->beginTransaction();
@@ -1450,14 +1492,12 @@ class CourseController
 
             jsonResponse([
                 'status' => 'success',
-                'message' => 'ÄĂ£ xĂ³a mĂ´n há»c thĂ nh cĂ´ng.',
+                'message' => 'Đã xóa lớp học phần thành công.',
                 'data' => ['id' => $courseId, 'course_code' => (string)($course['course_code'] ?? '')],
             ]);
         } catch (Throwable $e) {
-            if (isset($pdo) && $pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            jsonResponse(['status' => 'error', 'message' => 'KhĂ´ng thá»ƒ xĂ³a mĂ´n há»c.', 'detail' => $e->getMessage()], 500);
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => 'Lỗi hệ thống khi xóa.', 'detail' => $e->getMessage()], 500);
         }
     }
 
@@ -1480,12 +1520,12 @@ class CourseController
         $mode = strtolower(trim((string)($_GET['mode'] ?? '')));
         if ($action === 'preview') {
             if (!isset($_FILES['file']) || !is_array($_FILES['file'])) {
-                jsonResponse(['status' => 'error', 'message' => 'Chua co file du lieu.'], 400);
+                jsonResponse(['status' => 'error', 'message' => 'Chưa có file dữ liệu.'], 400);
                 return;
             }
             $file = $_FILES['file'];
             if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-                jsonResponse(['status' => 'error', 'message' => 'KhĂ´ng Ä‘á»c Ä‘Æ°á»£c file táº£i lĂªn.'], 400);
+                jsonResponse(['status' => 'error', 'message' => 'Không thể đọc được file tải lên.'], 400);
                 return;
             }
             $ext = strtolower(pathinfo((string)($file['name'] ?? ''), PATHINFO_EXTENSION));
@@ -1508,7 +1548,7 @@ class CourseController
                     'skipped_in_file' => $mapped['skipped'],
                 ]);
             } catch (Throwable $e) {
-                jsonResponse(['status' => 'error', 'message' => 'KhĂ´ng thá»ƒ Ä‘á»c file import.', 'detail' => $e->getMessage()], 422);
+                jsonResponse(['status' => 'error', 'message' => 'Không thể đọc file import.', 'detail' => $e->getMessage()], 422);
             }
             return;
         }
@@ -1520,9 +1560,52 @@ class CourseController
             return;
         }
 
+        if ($mode === 'subject') {
+            try {
+                $pdo = get_db_connection();
+                $pdo->exec('PRAGMA busy_timeout = 5000');
+                Course::ensureSchema($pdo);
+                $pdo->beginTransaction();
+                $inserted = 0;
+                $skipped = [];
+                foreach ($rows as $idx => $row) {
+                    $line = $idx + 2;
+                    $data = is_array($row) ? $row : [];
+                    try {
+                        Course::insertSubjectWithPdo($pdo, $data);
+                        $inserted++;
+                    } catch (RuntimeException $e) {
+                        $skipped[] = [
+                            'line' => $line,
+                            'course_code' => trim((string)($data['course_code'] ?? '')),
+                            'reason' => $e->getMessage(),
+                        ];
+                    }
+                }
+                $pdo->commit();
+                jsonResponse([
+                    'status' => 'success',
+                    'inserted_count' => $inserted,
+                    'skipped_count' => count($skipped),
+                    'skipped' => $skipped,
+                ]);
+                return;
+            } catch (Throwable $e) {
+                if (isset($pdo) && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                jsonResponse(['status' => 'error', 'message' => 'Không thể import môn học.', 'detail' => $e->getMessage()], 500);
+                return;
+            }
+        }
+
         if ($mode === 'section-lite') {
             try {
                 $pdo = get_db_connection();
+                
+                // THÊM DÒNG NÀY VÀO:
+                $pdo->exec('PRAGMA busy_timeout = 5000');
+                
                 Course::ensureSchema($pdo);
                 Teacher::ensureSchema($pdo);
                 $pdo->beginTransaction();
@@ -1648,39 +1731,67 @@ class CourseController
         Student::ensureSchema();
         Course::ensureSchema();
         $courseId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+        
         if ($courseId <= 0) {
-            jsonResponse(['status' => 'error', 'message' => 'ThiĂ¡ÂºÂ¿u mÄ‚Â£ lĂ¡Â»â€ºp hĂ¡Â»Âc.'], 422);
+            jsonResponse(['status' => 'error', 'message' => 'Thiếu mã lớp học phần.'], 422);
             return;
         }
 
-        $course = Course::findById($courseId);
-        if (!$course) {
-            jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y mÄ‚Â´n hĂ¡Â»Âc.'], 404);
-            return;
-        }
+        try {
+            $course = Course::findById($courseId);
+            if (!$course) {
+                jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy lớp học phần.'], 404);
+                return;
+            }
 
-        $loginId = (string)$identity['login_id'];
-        if ($this->isTeacher($identity) && (string)$course['teacher_code'] !== $loginId) {
-            jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
-            return;
-        }
-        if ($this->isStudent($identity) && !Course::isStudentEnrolled($courseId, $loginId)) {
-            jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
-            return;
-        }
-        if (!$this->isStaff($identity) && !$this->isTeacher($identity) && !$this->isStudent($identity)) {
-            jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
-            return;
-        }
+            $loginId = (string)$identity['login_id'];
+            if ($this->isTeacher($identity) && (string)$course['teacher_code'] !== $loginId) {
+                jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
+                return;
+            }
+            if ($this->isStudent($identity) && !Course::isStudentEnrolled($courseId, $loginId)) {
+                jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
+                return;
+            }
+            if (!$this->isStaff($identity) && !$this->isTeacher($identity) && !$this->isStudent($identity)) {
+                jsonResponse(['status' => 'error', 'message' => 'Forbidden'], 403);
+                return;
+            }
 
-        $students = Course::getStudentsByCourseId($courseId);
-        jsonResponse([
-            'status' => 'success',
-            'data' => $course,
-            'students' => $students,
-        ]);
+            // 1. Lấy danh sách sinh viên
+            $students = Course::getStudentsByCourseId($courseId);
+
+            // 2. Lấy bảng điểm và trọng số
+            $scoreMap = Course::getScoresByCourseId($courseId);
+            $wCc = (float)($course['weight_cc'] ?? 0);
+            $wGk = (float)($course['weight_gk'] ?? 0);
+            $wCk = (float)($course['weight_ck'] ?? 0);
+
+            // 3. Ghép điểm vào từng sinh viên
+            foreach ($students as &$student) {
+                $code = (string)$student['student_code'];
+                $score = $scoreMap[$code] ?? ['cc' => null, 'gk' => null, 'ck' => null];
+                
+                $student['cc'] = $score['cc'];
+                $student['gk'] = $score['gk'];
+                $student['ck'] = $score['ck'];
+                
+                $total = $this->calculateTotal($score['cc'], $score['gk'], $score['ck'], $wCc, $wGk, $wCk);
+                $student['total'] = $total;
+                $student['letter'] = $this->letterGrade($total);
+            }
+            unset($student); // Hủy tham chiếu
+
+            jsonResponse([
+                'status' => 'success',
+                'data' => $course,
+                'students' => $students,
+            ]);
+        } catch (Throwable $e) {
+            jsonResponse(['status' => 'error', 'message' => 'Lỗi hệ thống khi tải chi tiết.', 'detail' => $e->getMessage()], 500);
+        }
     }
-
+    
     public function update()
     {
         $identity = $this->currentIdentity();
@@ -1700,10 +1811,11 @@ class CourseController
         if (stripos((string)($_SERVER['CONTENT_TYPE'] ?? ''), 'application/json') === 0) {
             $payload = $this->parseJsonPayload();
         } else {
-            $payload = $_POST;
+            // When FormData is sent, use $_POST which contains multipart/form-data
+            $payload = array_merge($_GET, $_POST);
         }
         if (!is_array($payload)) {
-            jsonResponse(['status' => 'error', 'message' => 'DĂ¡Â»Â¯ liĂ¡Â»â€¡u khÄ‚Â´ng hĂ¡Â»Â£p lĂ¡Â»â€¡.'], 400);
+            jsonResponse(['status' => 'error', 'message' => 'Dữ liệu không hợp lệ.'], 400);
             return;
         }
 
@@ -1736,7 +1848,8 @@ class CourseController
             Course::ensureSchema($pdo);
             Student::ensureSchema($pdo);
             Teacher::ensureSchema($pdo);
-            [$data, $errors] = $this->validatePayload($payload, $pdo);
+            $sectionCodeToIgnore = strtoupper(trim((string)($payload['section_code'] ?? '')));
+            [$data, $errors] = $this->validatePayload($payload, $pdo, $sectionCodeToIgnore);
             if (!empty($errors)) {
                 jsonResponse(['status' => 'error', 'message' => 'DĂ¡Â»Â¯ liĂ¡Â»â€¡u khÄ‚Â´ng hĂ¡Â»Â£p lĂ¡Â»â€¡.', 'fields' => $errors], 422);
                 return;
@@ -1767,24 +1880,34 @@ class CourseController
                 ], 422);
                 return;
             }
-            $pdo->beginTransaction();
 
-            Course::updateByIdWithPdo($pdo, $courseId, $data);
+                        $teacherConflict2 = $this->findTeacherConflict($pdo, (string)($data['schedule'] ?? ''), (string)($data['teacher_code'] ?? ''), $courseId);
+            if ($teacherConflict2) {
+                $msg = sprintf('Giảng viên đã có lịch dạy lớp %s vào T%s-(%s-%s).',
+                    $teacherConflict2['course_code'], $teacherConflict2['day'], $teacherConflict2['start'], $teacherConflict2['end']);
+                jsonResponse(['status' => 'error', 'message' => $msg, 'fields' => ['schedule' => $msg]], 422);
+                return;
+            }
 
-            $enrollmentImport = null;
-            if (is_array($studentCodesFromFile)) {
-                $currentStudents = Course::getStudentsByCourseId($courseId);
-                $currentMap = [];
-                foreach ($currentStudents as $student) {
-                    $code = strtolower(trim((string)($student['student_code'] ?? '')));
-                    if ($code !== '') {
-                        $currentMap[$code] = true;
-                    }
+            // Load student data BEFORE transaction to avoid database lock
+            $currentStudents = Course::getStudentsByCourseId($courseId);
+            $currentMap = [];
+            foreach ($currentStudents as $student) {
+                $code = strtolower(trim((string)($student['student_code'] ?? '')));
+                if ($code !== '') {
+                    $currentMap[$code] = true;
                 }
+            }
 
+            $validCodes = [];
+            $newCodes = [];
+            $alreadyEnrolledRows = 0;
+            $scheduleConflictDetails = [];
+            $scheduleConflictRows = 0;
+
+            // Pre-process enrollment data BEFORE transaction
+            if (is_array($studentCodesFromFile)) {
                 $validCodes = Course::findValidStudentCodes($pdo, $studentCodesFromFile);
-                $newCodes = [];
-                $alreadyEnrolledRows = 0;
                 foreach ($validCodes as $code) {
                     $key = strtolower(trim((string)$code));
                     if ($key === '') {
@@ -1806,19 +1929,29 @@ class CourseController
 
                 $mergedCount = count($currentMap) + count($newCodes);
                 if ($data['max_students'] !== null && $mergedCount > (int)$data['max_students']) {
-                    $pdo->rollBack();
                     jsonResponse([
                         'status' => 'error',
-                        'message' => 'Danh sÄ‚Â¡ch sinh viÄ‚Âªn vĂ†Â°Ă¡Â»Â£t quÄ‚Â¡ sĂ¡Â»â€˜ lĂ†Â°Ă¡Â»Â£ng tĂ¡Â»â€˜i Ă„â€˜a cĂ¡Â»Â§a lĂ¡Â»â€ºp.',
+                        'message' => 'Danh sách sinh viên vượt quá số lượng tối đa của lớp.',
                     ], 422);
                     return;
                 }
+            }
 
-                $addedCount = 0;
-                if (!empty($newCodes)) {
-                    $addedCount = Course::appendEnrollmentsWithPdo($pdo, $courseId, $newCodes);
-                }
+            // Now begin transaction with minimal operations inside
+            $pdo->beginTransaction();
 
+            Course::updateByIdWithPdo($pdo, $courseId, $data);
+
+            $addedCount = 0;
+            if (!empty($newCodes)) {
+                $addedCount = Course::appendEnrollmentsWithPdo($pdo, $courseId, $newCodes);
+            }
+
+            $pdo->commit();
+
+            // Calculate stats after transaction
+            $enrollmentImport = null;
+            if (is_array($studentCodesFromFile)) {
                 $requestedValidRows = (int)($studentFileStats['valid_rows'] ?? count($studentCodesFromFile));
                 $invalidRows = (int)($studentFileStats['invalid_rows'] ?? 0);
                 $duplicateRows = (int)($studentFileStats['duplicate_rows'] ?? 0);
@@ -1840,7 +1973,6 @@ class CourseController
                 ];
             }
 
-            $pdo->commit();
             $course = Course::findById($courseId);
             $students = Course::getStudentsByCourseId($courseId);
 
@@ -1857,14 +1989,14 @@ class CourseController
                 jsonResponse([
                     'status' => 'error',
                     'message' => 'MÄ‚Â£ mÄ‚Â´n hĂ¡Â»Âc Ă„â€˜Ä‚Â£ tĂ¡Â»â€œn tĂ¡ÂºÂ¡i.',
-                    'fields' => ['course_code' => 'MÄ‚Â£ mÄ‚Â´n hĂ¡Â»Âc Ă„â€˜Ä‚Â£ tĂ¡Â»â€œn tĂ¡ÂºÂ¡i.'],
+                    'fields' => ['course_code' => 'MÄ‚Â mÄ‚Â´n hĂ¡Â»Âc Ă„â€˜Ä‚Â£ tĂ¡Â»â€œn tĂ¡ÂºÂ¡i.'],
                 ], 409);
                 return;
             }
-            jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng thĂ¡Â»Æ’ cĂ¡ÂºÂ­p nhĂ¡ÂºÂ­t mÄ‚Â´n hĂ¡Â»Âc.', 'detail' => $msg], 500);
+            jsonResponse(['status' => 'error', 'message' => 'Khong the cap nhat mon hoc.', 'detail' => $msg], 500);
         } catch (Throwable $e) {
             if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
-            jsonResponse(['status' => 'error', 'message' => 'LĂ¡Â»â€”i hĂ¡Â»â€¡ thĂ¡Â»â€˜ng.', 'detail' => $e->getMessage()], 500);
+            jsonResponse(['status' => 'error', 'message' => 'Loi he thong.', 'detail' => $e->getMessage()], 500);
         }
     }
 
@@ -1882,7 +2014,7 @@ class CourseController
 
         $courseId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
         if ($courseId <= 0) {
-            jsonResponse(['status' => 'error', 'message' => 'ThiĂ¡ÂºÂ¿u mÄ‚Â£ mÄ‚Â´n hĂ¡Â»Âc.'], 422);
+            jsonResponse(['status' => 'error', 'message' => 'Thiếu mã môn học.'], 422);
             return;
         }
 
@@ -1892,7 +2024,7 @@ class CourseController
 
         $course = Course::findById($courseId);
         if (!$course) {
-            jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y mÄ‚Â´n hĂ¡Â»Âc.'], 404);
+            jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy môn học.'], 404);
             return;
         }
         if ((string)$course['teacher_code'] !== (string)$identity['login_id']) {
@@ -1951,13 +2083,13 @@ class CourseController
 
         $payload = $this->parseJsonPayload();
         if (!is_array($payload)) {
-            jsonResponse(['status' => 'error', 'message' => 'DĂ¡Â»Â¯ liĂ¡Â»â€¡u khÄ‚Â´ng hĂ¡Â»Â£p lĂ¡Â»â€¡.'], 400);
+            jsonResponse(['status' => 'error', 'message' => 'Dữ liệu không hợp lệ.'], 400);
             return;
         }
 
         $courseId = (int)($payload['id'] ?? 0);
         if ($courseId <= 0) {
-            jsonResponse(['status' => 'error', 'message' => 'ThiĂ¡ÂºÂ¿u mÄ‚Â£ mÄ‚Â´n hĂ¡Â»Âc.'], 422);
+            jsonResponse(['status' => 'error', 'message' => 'Thiếu mã môn học.'], 422);
             return;
         }
 
@@ -1967,7 +2099,7 @@ class CourseController
 
         $course = Course::findById($courseId);
         if (!$course) {
-            jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y mÄ‚Â´n hĂ¡Â»Âc.'], 404);
+            jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy môn học.'], 404);
             return;
         }
         if ((string)$course['teacher_code'] !== (string)$identity['login_id']) {
@@ -1979,11 +2111,11 @@ class CourseController
         $wGk = $this->parseWeight($payload['weight_gk'] ?? 0);
         $wCk = $this->parseWeight($payload['weight_ck'] ?? 0);
         if ($wCc < 0 || $wGk < 0 || $wCk < 0) {
-            jsonResponse(['status' => 'error', 'message' => 'TĂ¡Â»Â· lĂ¡Â»â€¡ Ă„â€˜iĂ¡Â»Æ’m khÄ‚Â´ng Ă„â€˜Ă†Â°Ă¡Â»Â£c Ä‚Â¢m.'], 422);
+            jsonResponse(['status' => 'error', 'message' => 'Tỷ lệ điểm không thể âm.'], 422);
             return;
         }
         if (($wCc + $wGk + $wCk) <= 0) {
-            jsonResponse(['status' => 'error', 'message' => 'TĂ¡Â»â€¢ng tĂ¡Â»Â· lĂ¡Â»â€¡ Ă„â€˜iĂ¡Â»Æ’m phĂ¡ÂºÂ£i lĂ¡Â»â€ºn hĂ†Â¡n 0.'], 422);
+            jsonResponse(['status' => 'error', 'message' => 'Tổng tỷ lệ điểm phải lớn hơn 0.'], 422);
             return;
         }
 
@@ -2005,7 +2137,7 @@ class CourseController
             $ck = $this->parseScore($row['ck'] ?? null);
             foreach (['cc' => $cc, 'gk' => $gk, 'ck' => $ck] as $k => $v) {
                 if ($v !== null && ($v < 0 || $v > 10)) {
-                    jsonResponse(['status' => 'error', 'message' => "Ă„ÂiĂ¡Â»Æ’m $k cĂ¡Â»Â§a $code phĂ¡ÂºÂ£i trong khoĂ¡ÂºÂ£ng 0-10."], 422);
+                    jsonResponse(['status' => 'error', 'message' => "Điểm $k của $code phải trong khoảng 0-10."], 422);
                     return;
                 }
             }
@@ -2098,7 +2230,7 @@ class CourseController
         $studentCode = (string)$identity['login_id'];
         $row = Course::getScoreDetailForStudent($courseId, $studentCode);
         if (!$row) {
-            jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y dĂ¡Â»Â¯ liĂ¡Â»â€¡u Ă„â€˜iĂ¡Â»Æ’m.'], 404);
+            jsonResponse(['status' => 'error', 'message' => 'Không tìm thấy dữ liệu điểm.'], 404);
             return;
         }
 
@@ -2131,6 +2263,491 @@ class CourseController
                 'letter' => $this->letterGrade($total),
             ],
         ]);
+    }
+
+
+    // Phần điểm danh
+    private function verifyClassAccess(PDO $pdo, string $maLHP, array $identity, bool $requireTeacher = true)
+    {
+        $stmt = $pdo->prepare('SELECT MaGV, TrangThai, NgayHetHan, IsLocked FROM LopHocPhan WHERE MaLHP = :ma LIMIT 1');
+        $stmt->execute([':ma' => $maLHP]);
+        $lhp = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!$lhp) throw new RuntimeException("Không tìm thấy lớp học phần.");
+
+        $role = $identity['account_type'] ?? '';
+        $loginId = $identity['login_id'] ?? '';
+
+        // 1. Admin/Staff được toàn quyền (Bỏ qua mọi rào cản)
+        if ($role === 'staff') return true;
+
+        if ($requireTeacher) {
+            // Kiểm tra đúng giảng viên phụ trách không
+            if ($role !== 'teacher' || (string)$lhp['MaGV'] !== $loginId) {
+                throw new RuntimeException("Truy cập bị từ chối: Bạn không phải giảng viên phụ trách lớp này!");
+            }
+
+            // KIỂM TRA LỚP BỊ ADMIN KHÓA CHỦ ĐỘNG
+            if ((int)($lhp['IsLocked'] ?? 0) === 1) {
+                throw new RuntimeException("Lớp học đã bị Phòng Đào tạo khóa. Không thể thay đổi dữ liệu.");
+            }
+
+            // KIỂM TRA QUÁ HẠN (4 tháng)
+            if (!empty($lhp['NgayHetHan'])) {
+                $deadline = strtotime($lhp['NgayHetHan']);
+                if (time() > $deadline) {
+                    throw new RuntimeException("Đã quá thời hạn cập nhật dữ liệu (" . date('d/m/Y H:i', $deadline) . ").");
+                }
+            }
+
+            // Kiểm tra trạng thái đã kết thúc
+            if (($lhp['TrangThai'] ?? '') === 'COMPLETED') {
+                throw new RuntimeException("Lớp học đã kết thúc. Không thể thay đổi dữ liệu!");
+            }
+        } else {
+            // Dành cho Sinh viên (Chỉ được xem)
+            if ($role === 'student') {
+                $check = $pdo->prepare('SELECT 1 FROM KetQuaHocTap WHERE MaLHP = :ma AND MaSV = :sv LIMIT 1');
+                $check->execute([':ma' => $maLHP, ':sv' => $loginId]);
+                if (!$check->fetchColumn()) {
+                    throw new RuntimeException("Truy cập bị từ chối: Bạn không có tên trong lớp này!");
+                }
+            }
+        }
+        return true;
+    }
+
+    // Mark course as started (IsStarted = 1) when first data is entered
+    // Also set NgayHetHan if not already set (4 months from now)
+    private function markCourseAsStarted(PDO $pdo, string $maLHP): void
+    {
+        $stmt = $pdo->prepare(
+            'UPDATE LopHocPhan SET 
+              IsStarted = 1, 
+              StartedAt = datetime("now", "localtime"),
+              NgayHetHan = COALESCE(NgayHetHan, datetime("now", "localtime", "+4 months"))
+             WHERE MaLHP = :ma AND IsStarted = 0'
+        );
+        $stmt->execute([':ma' => $maLHP]);
+    }
+
+
+    // Phần điểm danh
+    public function createLesson()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+
+        $payload = $this->parseJsonPayload();
+        $maLHP = trim((string)($payload['section_code'] ?? ''));
+
+        try {
+            $pdo = get_db_connection();
+            Course::ensureSchema($pdo);
+            
+            // Tương đương verifyTeacherOwnership()
+            $this->verifyClassAccess($pdo, $maLHP, $identity, true);
+
+            $pdo->beginTransaction();
+            
+            // Mark course as started when first lesson is created
+            $this->markCourseAsStarted($pdo, $maLHP);
+            
+            $lessonNum = Course::createNewLessonWithPdo($pdo, $maLHP);
+            $pdo->commit();
+
+            jsonResponse(['status' => 'success', 'message' => "Tạo thành công buổi học thứ $lessonNum"]);
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    // Phần điểm danh
+    public function submitAttendance()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+
+        $payload = $this->parseJsonPayload();
+        $maLHP = trim((string)($payload['section_code'] ?? ''));
+        $weekNumber = (int)($payload['week_number'] ?? 0);
+        $attendanceList = $payload['attendance_list'] ?? []; // mảng: [['student_code' => '...', 'is_absent' => true/false]]
+
+        if ($maLHP === '' || $weekNumber <= 0 || !is_array($attendanceList)) {
+            jsonResponse(['status' => 'error', 'message' => 'Dữ liệu không hợp lệ.'], 400);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            Course::ensureSchema($pdo);
+            
+            // Xác minh quyền Giảng viên (phải là GV dạy lớp này và lớp chưa đóng)
+            $this->verifyClassAccess($pdo, $maLHP, $identity, true);
+
+            $pdo->beginTransaction();
+            
+            // Mark course as started when first attendance is submitted
+            $this->markCourseAsStarted($pdo, $maLHP);
+            
+            foreach ($attendanceList as $st) {
+                $maSV = trim((string)($st['student_code'] ?? ''));
+                $isAbsent = (bool)($st['is_absent'] ?? false);
+                
+                if ($maSV !== '') {
+                    // Gọi hàm xử lý chuỗi "0100" đã viết ở Model
+                    Course::updateAttendanceWithPdo($pdo, $maLHP, $maSV, $weekNumber, $isAbsent);
+                }
+            }
+            $pdo->commit();
+
+            jsonResponse(['status' => 'success', 'message' => 'Đã lưu điểm danh thành công!']);
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    //Phần điểm danh 
+    public function getAttendance()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+
+        // Lấy param từ URL (GET Request)
+        $maLHP = trim((string)($_GET['section_code'] ?? ''));
+        $weekNumber = (int)($_GET['week_number'] ?? 0);
+
+        if ($maLHP === '' || $weekNumber <= 0) {
+            jsonResponse(['status' => 'error', 'message' => 'Thiếu thông tin lớp hoặc buổi học.'], 400);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            
+            // requireTeacher = false => Admin, Giảng viên lớp này, Sinh viên lớp này đều được xem
+            $this->verifyClassAccess($pdo, $maLHP, $identity, false);
+
+            // Lấy danh sách lớp kèm chuỗi lịch sử điểm danh
+            $stmt = $pdo->prepare(
+                'SELECT k.MaSV, s.HoTen, k.LichSuDiemDanh, k.SoBuoiVang
+                 FROM KetQuaHocTap k
+                 INNER JOIN SinhVien s ON k.MaSV = s.MaSV
+                 WHERE k.MaLHP = :ma_lhp
+                 ORDER BY k.MaSV ASC'
+            );
+            $stmt->execute([':ma_lhp' => $maLHP]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            if (empty($rows)) {
+                throw new RuntimeException("Lớp học chưa có sinh viên.");
+            }
+
+            // Lấy độ dài chuỗi điểm danh (số buổi đã tạo) từ sinh viên đầu tiên
+            $totalLessons = strlen((string)($rows[0]['LichSuDiemDanh'] ?? ''));
+            if ($weekNumber > $totalLessons) {
+                throw new RuntimeException("Buổi học số $weekNumber chưa được tạo!");
+            }
+
+            $students = [];
+            foreach ($rows as $row) {
+                $history = (string)($row['LichSuDiemDanh'] ?? '');
+                
+                // Kiểm tra ký tự tại vị trí tuần hiện tại (index bắt đầu từ 0 nên phải trừ 1)
+                $statusChar = $history[$weekNumber - 1] ?? '0';
+                
+                $students[] = [
+                    'student_code' => $row['MaSV'],
+                    'full_name' => $row['HoTen'],
+                    'is_absent_this_week' => ($statusChar === '1'),
+                    'total_absences' => (int)$row['SoBuoiVang'],
+                    
+                ];
+            }
+
+            jsonResponse([
+                'status' => 'success',
+                'data' => [
+                    'section_code' => $maLHP,
+                    'week_number' => $weekNumber,
+                    'total_lessons' => $totalLessons,
+                    'students' => $students
+                ]
+            ]);
+
+        } catch (Throwable $e) {
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+    //Phần điểm danh 
+    public function deleteLesson()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+
+        // Đọc dữ liệu từ Frontend gửi lên
+        $payload = $this->parseJsonPayload();
+        $maLHP = trim((string)($payload['section_code'] ?? ''));
+        $lessonNumber = (int)($payload['week_number'] ?? $payload['lesson_number'] ?? 0);
+
+        if ($maLHP === '' || $lessonNumber <= 0) {
+            jsonResponse(['status' => 'error', 'message' => 'Dữ liệu không hợp lệ.'], 400);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            Course::ensureSchema($pdo);
+            
+            // Xác minh quyền: Chỉ Giảng viên phụ trách lớp và lớp chưa đóng mới được xóa
+            $this->verifyClassAccess($pdo, $maLHP, $identity, true);
+
+            // Chạy Transaction để đảm bảo an toàn dữ liệu
+            $pdo->beginTransaction();
+            Course::deleteLessonWithPdo($pdo, $maLHP, $lessonNumber);
+            $pdo->commit();
+
+            jsonResponse([
+                'status' => 'success', 
+                'message' => "Đã xóa thành công buổi học số $lessonNumber."
+            ]);
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+   
+    // Nhập điểm cho từng sinh viên và tự động tính tổng kết
+   // CHỈ CẬP NHẬT ĐIỂM CHO 1 SINH VIÊN
+    public function submitScore()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+
+        $payload = $this->parseJsonPayload();
+        $maLHP = trim((string)($payload['section_code'] ?? ''));
+        $maSV = trim((string)($payload['student_code'] ?? ''));
+        
+        $cc = isset($payload['cc']) && $payload['cc'] !== '' ? (float)$payload['cc'] : null;
+        $gk = isset($payload['gk']) && $payload['gk'] !== '' ? (float)$payload['gk'] : null;
+        $ck = isset($payload['ck']) && $payload['ck'] !== '' ? (float)$payload['ck'] : null;
+
+        if ($maLHP === '' || $maSV === '') {
+            jsonResponse(['status' => 'error', 'message' => 'Thiếu mã lớp hoặc mã sinh viên.'], 400);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            Course::ensureSchema($pdo);
+            $this->verifyClassAccess($pdo, $maLHP, $identity, true);
+
+            $pdo->beginTransaction();
+            
+            // Mark course as started when first score is entered
+            $this->markCourseAsStarted($pdo, $maLHP);
+            
+            // Cập nhật điểm thành phần
+            $stmt = $pdo->prepare(
+                'UPDATE KetQuaHocTap 
+                 SET DiemChuyenCan = :cc, DiemGiuaKy = :gk, DiemCuoiKy = :ck 
+                 WHERE MaLHP = :ma_lhp AND MaSV = :ma_sv'
+            );
+            $stmt->execute([':cc' => $cc, ':gk' => $gk, ':ck' => $ck, ':ma_lhp' => $maLHP, ':ma_sv' => $maSV]);
+
+            // Tính điểm tổng kết (Model tự lấy Trọng số từ DB)
+            Course::updateFinalGradeWithPdo($pdo, $maLHP, $maSV);
+
+            $pdo->commit();
+
+            // Lấy điểm tổng kết mới trả về FE
+            $stmtResult = $pdo->prepare('SELECT DiemTongKet FROM KetQuaHocTap WHERE MaLHP = :ma_lhp AND MaSV = :ma_sv LIMIT 1');
+            $stmtResult->execute([':ma_lhp' => $maLHP, ':ma_sv' => $maSV]);
+            $newTotal = $stmtResult->fetchColumn();
+
+            jsonResponse([
+                'status' => 'success', 
+                'message' => "Cập nhật điểm cho sinh viên $maSV thành công!",
+                'data' => [
+                    'student_code' => $maSV,
+                    'total_score' => $newTotal !== false ? (float)$newTotal : null,
+                    'letter_grade' => $this->letterGrade($newTotal)
+                ]
+            ]);
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+    // HÀM MỚI: CÀI ĐẶT TRỌNG SỐ CHO CẢ LỚP
+    public function updateWeights()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+
+        $payload = $this->parseJsonPayload();
+        $maLHP = trim((string)($payload['section_code'] ?? ''));
+        $wCc = (float)($payload['weight_cc'] ?? 0);
+        $wGk = (float)($payload['weight_gk'] ?? 0);
+        $wCk = (float)($payload['weight_ck'] ?? 0);
+
+        if ($maLHP === '') {
+            jsonResponse(['status' => 'error', 'message' => 'Thiếu mã lớp học phần.'], 400);
+            return;
+        }
+        
+        // Validate tổng trọng số bằng 1.0 (hoặc 100 tùy nghiệp vụ)
+        if (abs(($wCc + $wGk + $wCk) - 1.0) > 0.01) {
+            jsonResponse(['status' => 'error', 'message' => 'Tổng các trọng số phải bằng 1.0'], 422);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            Course::ensureSchema($pdo);
+            $this->verifyClassAccess($pdo, $maLHP, $identity, true);
+
+            $pdo->beginTransaction();
+
+            // 1. Lưu trọng số mới vào bảng Lớp học phần
+            $stmt = $pdo->prepare('UPDATE LopHocPhan SET TrongSoCC = :cc, TrongSoGK = :gk, TrongSoCK = :ck WHERE MaLHP = :ma_lhp');
+            $stmt->execute([':cc' => $wCc, ':gk' => $wGk, ':ck' => $wCk, ':ma_lhp' => $maLHP]);
+
+            // 2. Tính lại điểm cho TOÀN BỘ sinh viên trong lớp
+            $stmtAllSv = $pdo->prepare('SELECT MaSV FROM KetQuaHocTap WHERE MaLHP = :ma_lhp');
+            $stmtAllSv->execute([':ma_lhp' => $maLHP]);
+            $allSv = $stmtAllSv->fetchAll(PDO::FETCH_COLUMN);
+            
+            foreach ($allSv as $svCode) {
+                Course::updateFinalGradeWithPdo($pdo, $maLHP, (string)$svCode);
+            }
+
+            $pdo->commit();
+
+            // 3. Lấy danh sách sinh viên cập nhật với điểm mới
+            $scoreMap = Course::getScoresByCourseId(0); // Get scores using legacy approach
+            // Query directly for this section's students
+            $stmtStudents = $pdo->prepare(
+                'SELECT s.MaSV AS student_code, s.HoTen AS full_name, s.MaLop AS class_name, ng.TenNganh AS major, s.Email AS email
+                 FROM KetQuaHocTap k
+                 INNER JOIN SinhVien s ON s.MaSV = k.MaSV
+                 LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
+                 LEFT JOIN Nganh ng ON ng.MaNganh = l.MaNganh
+                 WHERE k.MaLHP = :ma_lhp
+                 ORDER BY s.MaSV ASC'
+            );
+            $stmtStudents->execute([':ma_lhp' => $maLHP]);
+            $students = $stmtStudents->fetchAll(PDO::FETCH_ASSOC);
+
+            // Get updated scores for all students
+            $stmtScores = $pdo->prepare(
+                'SELECT MaSV, DiemChuyenCan, DiemGiuaKy, DiemCuoiKy, DiemTongKet FROM KetQuaHocTap WHERE MaLHP = :ma_lhp'
+            );
+            $stmtScores->execute([':ma_lhp' => $maLHP]);
+            $scoreData = $stmtScores->fetchAll(PDO::FETCH_ASSOC);
+            $scoreMap = [];
+            foreach ($scoreData as $row) {
+                $scoreMap[(string)$row['MaSV']] = [
+                    'cc' => $row['DiemChuyenCan'] !== null ? (float)$row['DiemChuyenCan'] : null,
+                    'gk' => $row['DiemGiuaKy'] !== null ? (float)$row['DiemGiuaKy'] : null,
+                    'ck' => $row['DiemCuoiKy'] !== null ? (float)$row['DiemCuoiKy'] : null,
+                    'total' => $row['DiemTongKet'] !== null ? (float)$row['DiemTongKet'] : null
+                ];
+            }
+
+            // Add scores to students
+            foreach ($students as &$student) {
+                $code = (string)$student['student_code'];
+                $score = $scoreMap[$code] ?? ['cc' => null, 'gk' => null, 'ck' => null, 'total' => null];
+                $student['cc'] = $score['cc'];
+                $student['gk'] = $score['gk'];
+                $student['ck'] = $score['ck'];
+                $student['total'] = $score['total'];
+                $student['letter'] = $this->letterGrade($score['total']);
+            }
+            unset($student);
+
+            jsonResponse([
+                'status' => 'success', 
+                'message' => 'Đã cập nhật trọng số và tính lại điểm cho toàn lớp!',
+                'students' => $students
+            ]);
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => $e->getMessage()], 400);
+        }
+    }
+
+
+    // HÀM MỚI: Dành riêng cho Admin Khóa/Mở lớp hoặc gia hạn
+    public function toggleLock()
+    {
+        $identity = $this->currentIdentity();
+        if (!$identity) {
+            jsonResponse(['status' => 'error', 'message' => 'Unauthorized'], 401);
+            return;
+        }
+        if (!$this->isStaff($identity)) {
+            jsonResponse(['status' => 'error', 'message' => 'Chỉ Phòng Đào tạo mới có quyền này.'], 403);
+            return;
+        }
+
+        $payload = $this->parseJsonPayload();
+        $maLHP = trim((string)($payload['section_code'] ?? ''));
+        $isLocked = isset($payload['is_locked']) ? (int)$payload['is_locked'] : 0;
+        $ngayHetHan = trim((string)($payload['ngay_het_han'] ?? ''));
+
+        if ($maLHP === '') {
+            jsonResponse(['status' => 'error', 'message' => 'Thiếu mã lớp học phần.'], 400);
+            return;
+        }
+
+        try {
+            $pdo = get_db_connection();
+            $pdo->beginTransaction();
+
+            $sql = 'UPDATE LopHocPhan SET IsLocked = :is_locked';
+            $params = [':is_locked' => $isLocked, ':ma_lhp' => $maLHP];
+
+            // Nếu Admin có nhập ngày mới để gia hạn
+            if ($ngayHetHan !== '') {
+                $sql .= ', NgayHetHan = :ngay_het_han';
+                $params[':ngay_het_han'] = $ngayHetHan;
+            }
+
+            $sql .= ' WHERE MaLHP = :ma_lhp';
+
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+
+            $pdo->commit();
+            jsonResponse(['status' => 'success', 'message' => 'Đã cập nhật trạng thái khóa lớp thành công!']);
+        } catch (Throwable $e) {
+            if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+            jsonResponse(['status' => 'error', 'message' => 'Không thể cập nhật.', 'detail' => $e->getMessage()], 500);
+        }
     }
 }
 

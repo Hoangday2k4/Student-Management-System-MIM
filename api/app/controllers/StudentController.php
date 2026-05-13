@@ -45,6 +45,7 @@ class StudentController
         $student['gender'] = $this->normalizeGender((string)($student['gender'] ?? '')) ?: ($student['gender'] ?? '');
         $student['status'] = $this->normalizeStatus((string)($student['status'] ?? '')) ?: ($student['status'] ?? '');
         $student['avatar_url'] = $this->resolveAvatarUrl($student['avatar'] ?? '');
+        // Giữ nguyên major, major_name, faculty_name từ mapRow() - không modify
         return $student;
     }
 
@@ -164,6 +165,7 @@ class StudentController
         $studentCode = trim((string)($payload['student_code'] ?? ''));
         $fullName = trim((string)($payload['full_name'] ?? ''));
         $className = trim((string)($payload['class_name'] ?? ''));
+        $major = trim((string)($payload['major'] ?? ''));
         $cccd = trim((string)($payload['cccd'] ?? ''));
         $address = trim((string)($payload['address'] ?? ''));
         $admissionDate = trim((string)($payload['admission_date'] ?? ''));
@@ -197,6 +199,7 @@ class StudentController
                 'date_of_birth' => trim((string)($payload['date_of_birth'] ?? '')),
                 'gender' => $gender,
                 'class_name' => $className,
+                'major' => $major,
                 'cccd' => $cccd,
                 'address' => $address,
                 'admission_date' => $admissionDate,
@@ -206,10 +209,11 @@ class StudentController
                 'avatar' => '',
                 'status' => $status,
             ]);
-            Admin::createAccountWithPdo($pdo, $studentCode, '123456', $fullName, 'student');
+           Admin::createAccountWithPdo($pdo, $studentCode, '123456', $fullName, 'student');
             $pdo->commit();
 
-            $student = Student::findById($studentId);
+            // SỬA DÒNG NÀY: Dùng findByStudentCode thay vì findById
+            $student = Student::findByStudentCode($studentCode);
             $student = $this->formatStudentForResponse($student);
 
             jsonResponse([
@@ -272,17 +276,37 @@ class StudentController
 
     private function parseCsvRows(string $filePath): array
     {
+        $content = file_get_contents($filePath);
+        if ($content === false) return [];
+        
+        // 1. Tự động "hóa giải" ký tự tàng hình BOM của Excel
+        $content = preg_replace('/^\xEF\xBB\xBF/', '', $content);
+        
+        // 2. Chấp hết mọi thể loại xuống dòng của Mac/Windows/Linux
+        $content = str_replace(["\r\n", "\r"], "\n", $content);
+        $lines = explode("\n", $content);
+        
         $rows = [];
-        $handle = fopen($filePath, 'rb');
-        if (!$handle) return $rows;
-        while (($data = fgetcsv($handle)) !== false) {
-            $row = [];
-            foreach ($data as $cell) {
-                $row[] = trim((string)$cell);
-            }
+        if (empty($lines)) return $rows;
+
+        // 3. Tự động nhận diện dấu phẩy hay chấm phẩy
+        $firstLine = $lines[0];
+        $delimiter = ',';
+        if (substr_count($firstLine, ';') > substr_count($firstLine, ',')) {
+            $delimiter = ';';
+        } elseif (substr_count($firstLine, "\t") > substr_count($firstLine, ',')) {
+            $delimiter = "\t";
+        }
+
+        // 4. Bóc tách dữ liệu cực chuẩn xác
+        foreach ($lines as $line) {
+            if (trim($line) === '') continue;
+            
+            $row = str_getcsv($line, $delimiter, '"', '');
+            $row = array_map('trim', $row);
             $rows[] = $row;
         }
-        fclose($handle);
+        
         return $rows;
     }
 
@@ -403,7 +427,7 @@ class StudentController
         return $rows;
     }
 
-    private function mapImportRows(array $rawRows): array
+   private function mapImportRows(array $rawRows): array
     {
         if (count($rawRows) < 2) {
             return ['rows' => [], 'skipped' => []];
@@ -411,6 +435,8 @@ class StudentController
 
         $headers = $rawRows[0];
         $headerMap = [];
+        
+        // Từ điển các cách gọi tên cột
         $headerAlias = [
             'student_code' => ['masosinhvien', 'masosinhvin', 'mssv', 'studentcode'],
             'full_name' => ['hoten', 'hten', 'tensinhvien', 'fullname'],
@@ -418,14 +444,16 @@ class StudentController
             'date_of_birth' => ['ngaysinh', 'dateofbirth', 'dob'],
             'gender' => ['gioitinh', 'gender'],
             'address' => ['diachi', 'address'],
-            'class_name' => ['lop', 'lp', 'classname'],
+            'class_name' => ['lop', 'lp', 'classname', 'lopsinhhoat'],
             'admission_date' => ['ngaynhaphoc', 'admissiondate', 'ngayvaotruong'],
+            'major' => ['nganh', 'manganh', 'major'],
             'faculty' => ['khoa', 'vien', 'khoavien', 'faculty'],
             'email' => ['email'],
             'phone' => ['sodienthoai', 'sdt', 'phone'],
             'status' => ['trangthai', 'status'],
         ];
 
+        // Quét hàng đầu tiên để map cột dựa vào TÊN CỘT
         foreach ($headers as $index => $label) {
             $normalized = $this->normalizeHeader((string)$label);
             if ($normalized === '') continue;
@@ -437,85 +465,69 @@ class StudentController
             }
         }
 
-        // Fallback to default 11-column order when some headers are malformed.
-        if (count($headers) >= 11) {
-            $defaultMap = [
-                'student_code' => 0,
-                'full_name' => 1,
-                'cccd' => 2,
-                'date_of_birth' => 3,
-                'gender' => 4,
-                'address' => 5,
-                'phone' => 6,
-                'email' => 7,
-                'class_name' => 8,
-                'admission_date' => 9,
-                'status' => 10,
-            ];
-            foreach ($defaultMap as $field => $position) {
-                if (!isset($headerMap[$field])) {
-                    $headerMap[$field] = $position;
-                }
-            }
-        } elseif (count($headers) >= 9) {
-            $defaultMap = [
-                'student_code' => 0,
-                'full_name' => 1,
-                'date_of_birth' => 2,
-                'gender' => 3,
-                'class_name' => 4,
-                'faculty' => 5,
-                'email' => 6,
-                'phone' => 7,
-                'status' => 8,
-            ];
-            foreach ($defaultMap as $field => $position) {
-                if (!isset($headerMap[$field])) {
-                    $headerMap[$field] = $position;
-                }
+        // --- ĐÃ BỎ HOÀN TOÀN ĐOẠN $defaultMap Ở ĐÂY ---
+
+        // Chỉ bắt buộc 3 cột tối thiểu để tạo 1 sinh viên: MSSV, Họ Tên, Lớp
+        $requiredFields = ['student_code', 'full_name', 'class_name'];
+        $missingFields = [];
+        
+        foreach ($requiredFields as $req) {
+            if (!isset($headerMap[$req])) {
+                // Tùy chỉnh tên cột để báo lỗi cho dễ hiểu
+                $label = $req === 'student_code' ? 'MSSV' : ($req === 'full_name' ? 'Họ tên' : 'Lớp');
+                $missingFields[] = $label;
             }
         }
 
-        foreach (['student_code', 'full_name', 'class_name'] as $requiredField) {
-            if (!isset($headerMap[$requiredField])) {
-                throw new RuntimeException('File thieu cot bat buoc: ' . $requiredField);
-            }
+        // Báo lỗi rõ ràng nếu thiếu cột bắt buộc
+        if (!empty($missingFields)) {
+            throw new RuntimeException('File thiếu các cột bắt buộc: ' . implode(', ', $missingFields) . '. Vui lòng kiểm tra lại dòng tiêu đề.');
         }
 
         $rows = [];
         $skipped = [];
         $seenCodes = [];
+        
         for ($i = 1; $i < count($rawRows); $i++) {
             $line = $i + 1;
             $source = $rawRows[$i];
 
+            // Lấy dữ liệu an toàn dựa trên Map
             $row = [
                 'student_code' => trim((string)($source[$headerMap['student_code']] ?? '')),
                 'full_name' => trim((string)($source[$headerMap['full_name']] ?? '')),
+                'class_name' => trim((string)($source[$headerMap['class_name']] ?? '')),
                 'cccd' => trim((string)($source[$headerMap['cccd'] ?? -1] ?? '')),
                 'date_of_birth' => trim((string)($source[$headerMap['date_of_birth'] ?? -1] ?? '')),
                 'gender' => trim((string)($source[$headerMap['gender'] ?? -1] ?? 'Nam')),
                 'address' => trim((string)($source[$headerMap['address'] ?? -1] ?? '')),
-                'class_name' => trim((string)($source[$headerMap['class_name']] ?? '')),
                 'admission_date' => trim((string)($source[$headerMap['admission_date'] ?? -1] ?? '')),
+                'major' => trim((string)($source[$headerMap['major'] ?? -1] ?? '')),
                 'faculty' => trim((string)($source[$headerMap['faculty'] ?? -1] ?? '')),
                 'email' => trim((string)($source[$headerMap['email'] ?? -1] ?? '')),
                 'phone' => trim((string)($source[$headerMap['phone'] ?? -1] ?? '')),
-                'status' => trim((string)($source[$headerMap['status'] ?? -1] ?? 'Dang hoc')),
+                'status' => trim((string)($source[$headerMap['status'] ?? -1] ?? 'Đang học')),
             ];
 
+            // Bỏ qua dòng trống hoàn toàn
             if ($row['student_code'] === '' && $row['full_name'] === '' && $row['class_name'] === '') {
                 continue;
             }
+            
+            // Đánh dấu lỗi nếu 1 trong 3 trường bắt buộc bị trống ở dòng đó
             if ($row['student_code'] === '' || $row['full_name'] === '' || $row['class_name'] === '') {
-                $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Thieu truong bat buoc'];
+                $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Thiếu dữ liệu MSSV, Họ tên hoặc Lớp'];
                 continue;
             }
-            if (isset($seenCodes[$row['student_code']])) {
-                $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Trung trong file'];
+            
+            // Tránh sinh viên bị lặp lại nhiều lần trong cùng 1 file Excel
+            $key = strtolower($row['student_code']);
+            if (isset($seenCodes[$key])) {
+                $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Bị lặp lại (trùng) trong file Excel'];
                 continue;
             }
-            $seenCodes[$row['student_code']] = true;
+            
+            $seenCodes[$key] = true;
             $rows[] = $row;
         }
 
@@ -539,6 +551,7 @@ class StudentController
             'class_name' => trim((string)($row['class_name'] ?? '')),
             'admission_date' => trim((string)($row['admission_date'] ?? '')),
             'faculty' => trim((string)($row['faculty'] ?? '')),
+            'major' => trim((string)($row['major'] ?? '')),
             'email' => trim((string)($row['email'] ?? '')),
             'phone' => trim((string)($row['phone'] ?? '')),
             'status' => $status,
@@ -607,6 +620,14 @@ class StudentController
                         $previewSkipped[] = ['line' => $line, 'student_code' => $studentCode, 'reason' => 'Da ton tai trong bang sinh vien'];
                         continue;
                     }
+                    
+                    // Validate class exists
+                    $classCheckStmt = $pdo->prepare('SELECT 1 FROM LopSinhHoat WHERE MaLop = :ma_lop LIMIT 1');
+                    $classCheckStmt->execute([':ma_lop' => trim((string)$row['class_name'])]);
+                    if (!$classCheckStmt->fetchColumn()) {
+                        $previewSkipped[] = ['line' => $line, 'student_code' => $studentCode, 'reason' => 'Lớp không tồn tại: ' . $row['class_name']];
+                        continue;
+                    }
 
                     $previewRows[] = $row;
                 }
@@ -668,6 +689,21 @@ class StudentController
                 $savepoint = 'sp_student_import_' . $idx;
                 $pdo->exec('SAVEPOINT ' . $savepoint);
                 try {
+                    // Verify class exists before importing
+                    $className = trim((string)$row['class_name']);
+                    $classCheckStmt = $pdo->prepare('SELECT MaNganh FROM LopSinhHoat WHERE MaLop = :ma_lop LIMIT 1');
+                    $classCheckStmt->execute([':ma_lop' => $className]);
+                    $classResult = $classCheckStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$classResult) {
+                        throw new Exception("Lớp '$className' không tồn tại");
+                    }
+                    
+                    // If major is empty, resolve from class
+                    $major = trim((string)$row['major']);
+                    if ($major === '' && isset($classResult['MaNganh'])) {
+                        $major = $classResult['MaNganh'];
+                    }
+                    
                     Student::insertWithPdo($pdo, [
                         'student_code' => $row['student_code'],
                         'full_name' => $row['full_name'],
@@ -678,6 +714,7 @@ class StudentController
                         'address' => $row['address'],
                         'admission_date' => $row['admission_date'],
                         'faculty' => $row['faculty'],
+                        'major' => $major,
                         'email' => $row['email'],
                         'phone' => $row['phone'],
                         'avatar' => '',
@@ -700,19 +737,31 @@ class StudentController
                         }
                     }
                     $inserted++;
-                } catch (PDOException $rowError) {
+                } catch (Exception $rowError) {
                     $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
                     $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
                     $msg = (string)$rowError->getMessage();
-                    if (strpos($msg, 'UNIQUE constraint failed: SinhVien.MaSV') !== false) {
-                        $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Da ton tai trong bang sinh vien'];
-                        $existingStudents[$studentCodeKey] = true;
+                    
+                    // Class not found - skip row
+                    if (strpos($msg, 'không tồn tại') !== false) {
+                        $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Lớp không tồn tại: ' . $row['class_name']];
                         continue;
                     }
-                    if (strpos($msg, 'UNIQUE constraint failed: SinhVien.CCCD') !== false) {
-                        $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'CCCD da ton tai'];
-                        continue;
+                    
+                    // Handle PDO errors
+                    if ($rowError instanceof PDOException) {
+                        if (strpos($msg, 'UNIQUE constraint failed: SinhVien.MaSV') !== false) {
+                            $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Da ton tai trong bang sinh vien'];
+                            $existingStudents[$studentCodeKey] = true;
+                            continue;
+                        }
+                        if (strpos($msg, 'UNIQUE constraint failed: SinhVien.CCCD') !== false) {
+                            $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'CCCD da ton tai'];
+                            continue;
+                        }
+                        throw $rowError;
                     }
+                    
                     throw $rowError;
                 }
             }
@@ -764,7 +813,9 @@ class StudentController
         $email = trim((string)($payload['email'] ?? ($current['email'] ?? '')));
         $gender = $this->normalizeGender((string)($payload['gender'] ?? ($current['gender'] ?? '')));
         $status = $this->normalizeStatus((string)($payload['status'] ?? ($current['status'] ?? '')));
-
+        $major = trim((string)($payload['major'] ?? ($current['major'] ?? '')));
+        // Lưu ý: Kiểm tra tên biến 'faculty' hay 'major' đồng bộ với Frontend
+        $phone = trim((string)($payload['phone'] ?? ($current['phone'] ?? '')));
         $errors = [];
         if ($fullName === '') $errors['full_name'] = 'Hay nhap ho ten.';
         if ($className === '') $errors['class_name'] = 'Hay nhap lop.';
@@ -879,7 +930,7 @@ class StudentController
         }
         $student = Student::findByStudentCode($studentCode);
         if (!$student) {
-            jsonResponse(['status' => 'error', 'message' => 'KhÄ‚Â´ng tÄ‚Â¬m thĂ¡ÂºÂ¥y sinh viÄ‚Âªn.'], 404);
+            jsonResponse(['status' => 'error', 'message' => 'Sinh vien khong ton tai.'], 404);
             return;
         }
         jsonResponse(['status' => 'success', 'data' => $this->formatStudentForResponse($student)]);
@@ -911,6 +962,8 @@ class StudentController
         $gender = $this->normalizeGender((string)($payload['gender'] ?? ''));
         $status = $this->normalizeStatus((string)($payload['status'] ?? ''));
         $dateOfBirth = trim((string)($payload['date_of_birth'] ?? ''));
+        $major = trim((string)($payload['major'] ?? ($current['major'] ?? ''))); 
+// Lưu ý: Kiểm tra tên biến 'faculty' hay 'major' đồng bộ với Frontend
         $phone = trim((string)($payload['phone'] ?? ''));
         $cccd = trim((string)($payload['cccd'] ?? ''));
         $address = trim((string)($payload['address'] ?? ''));
@@ -970,6 +1023,7 @@ class StudentController
                     CCCD = :cccd,
                     DiaChi = :address,
                     MaLop = :class_name,
+                    MaNganh = :major,
                     NgayNhapHoc = :admission_date,
                     Email = :email,
                     SoDienThoai = :phone,
@@ -984,6 +1038,7 @@ class StudentController
                 ':cccd' => $cccd ?: null,
                 ':address' => $address ?: null,
                 ':class_name' => $className,
+                ':major' => $major ?: null,
                 ':admission_date' => $admissionDate ?: null,
                 ':email' => $email ?: null,
                 ':phone' => $phone ?: null,
