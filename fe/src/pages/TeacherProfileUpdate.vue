@@ -1,4 +1,4 @@
-﻿<script setup>
+<script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { FACULTY_OPTIONS } from '@/constants/options'
@@ -17,7 +17,6 @@ const form = reactive({
   date_of_birth: '',
   gender: 'Nam',
   department: FACULTY_OPTIONS[0],
-  homeroom_class: '',
   email: '',
   phone: '',
   status: 'Đang công tác',
@@ -95,7 +94,6 @@ onMounted(async () => {
     form.date_of_birth = p.date_of_birth || ''
     form.gender = p.gender || 'Nam'
     form.department = p.department || FACULTY_OPTIONS[0]
-    form.homeroom_class = p.homeroom_class || ''
     form.email = p.email || ''
     form.phone = p.phone || ''
     form.status = p.status || 'Đang công tác'
@@ -127,7 +125,6 @@ async function submitForm() {
     body.append('date_of_birth', form.date_of_birth)
     body.append('gender', form.gender)
     body.append('department', form.department)
-    body.append('homeroom_class', form.homeroom_class.trim())
     body.append('email', form.email.trim())
     body.append('phone', form.phone.trim())
     body.append('status', form.status)
@@ -201,9 +198,6 @@ async function submitForm() {
           <p v-if="errors.email" class="error">{{ errors.email }}</p>
         </div>
 
-        <label>Lớp phụ trách</label>
-        <input v-model="form.homeroom_class" type="text" placeholder="Để trống nếu không chủ nhiệm lớp nào" />
-
         <label>Số điện thoại</label>
         <input v-model="form.phone" type="text" />
 
@@ -238,7 +232,6 @@ async function submitForm() {
           <span class="label">Ngày sinh</span><span>{{ form.date_of_birth || '-' }}</span>
           <span class="label">Giới tính</span><span>{{ form.gender }}</span>
           <span class="label">Khoa</span><span>{{ form.department }}</span>
-          <span class="label">Lớp phụ trách</span><span>{{ form.homeroom_class || '-' }}</span>
           <span class="label">Email</span><span>{{ form.email || '-' }}</span>
           <span class="label">Số điện thoại</span><span>{{ form.phone || '-' }}</span>
           <span class="label">Trạng thái</span><span>{{ form.status }}</span>
