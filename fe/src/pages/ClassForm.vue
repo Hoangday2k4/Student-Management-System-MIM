@@ -14,6 +14,7 @@ const serverMessage = ref('')
 const doneMessage = ref('')
 const fileInputRef = ref(null)
 const bulkRows = ref([])
+const bulkSkipped = ref([])
 const bulkFileName = ref('')
 const bulkResult = ref({ inserted_count: 0, skipped_count: 0, skipped: [] })
 const majorOptions = ref([])
@@ -238,94 +239,82 @@ function triggerImportFile() {
 async function handleImportFile(event) {
   const file = event?.target?.files?.[0]
   if (!file) return
-  if (!file.name.toLowerCase().endsWith('.csv')) {
-    serverMessage.value = 'Chỉ hỗ trợ file CSV cho chức năng này.'
+  
+  const ext = file.name.toLowerCase()
+  if (!ext.endsWith('.csv') && !ext.endsWith('.xlsx')) {
+    serverMessage.value = 'Chỉ hỗ trợ file CSV hoặc XLSX.'
     return
   }
 
-  const text = await file.text()
-  const rows = csvToRows(text)
-  if (!rows.length) {
-    serverMessage.value = 'File trống hoặc không hợp lệ.'
-    return
-  }
+  saving.value = true
+  serverMessage.value = ''
+  bulkRows.value = []
+  bulkSkipped.value = []
 
-  const headers = rows[0].map((h) => normalizeKey(h))
-  const required = ['malop', 'tenlop', 'manganh']
-  for (const key of required) {
-    if (!headers.includes(key)) {
-      serverMessage.value = `File thiếu cột bắt buộc: ${key}.`
+  try {
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const res = await fetch('/api/classes?action=preview', {
+      method: 'POST',
+      body: formData,
+    })
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok || data.status !== 'success') {
+      serverMessage.value = data.message || 'Không thể xử lý file import.'
       return
     }
-  }
 
-  const get = (row, key) => {
-    const idx = headers.indexOf(key)
-    return idx >= 0 ? String(row[idx] || '').trim() : ''
-  }
+    bulkRows.value = Array.isArray(data.rows) ? data.rows : []
+    bulkSkipped.value = Array.isArray(data.skipped_in_file) ? data.skipped_in_file : []
+    bulkFileName.value = file.name
 
-  const unique = new Set()
-  const parsed = []
-  for (let i = 1; i < rows.length; i++) {
-    const row = rows[i]
-    const code = get(row, 'malop')
-    const name = get(row, 'tenlop')
-    const majorCode = get(row, 'manganh')
-    if (!code || !name || !majorCode) continue
-    const key = code.toLowerCase()
-    if (unique.has(key)) continue
-    unique.add(key)
-    parsed.push({
-      code,
-      name,
-      major_code: majorCode,
-      head_teacher_code: get(row, 'magvcovan') || get(row, 'gvcnmsgv') || get(row, 'gvcn'),
-      school_year: get(row, 'nienkhoa'),
-    })
-  }
+    if (!bulkRows.value.length) {
+      serverMessage.value = `Không có dòng hợp lệ. ${bulkSkipped.value.length > 0 ? `${bulkSkipped.value.length} dòng bị bỏ qua.` : ''}`
+      return
+    }
 
-  if (!parsed.length) {
-    serverMessage.value = 'Không có dòng hợp lệ để nhập.'
-    return
+    step.value = 'bulk-confirm'
+  } catch (error) {
+    serverMessage.value = 'Không kết nối được máy chủ.'
+  } finally {
+    saving.value = false
   }
-
-  bulkRows.value = parsed
-  bulkFileName.value = file.name
-  step.value = 'bulk-confirm'
 }
 
 async function submitBulkImport() {
   if (!bulkRows.value.length) return
   saving.value = true
   serverMessage.value = ''
-  const skipped = []
-  let inserted = 0
-  for (const row of bulkRows.value) {
-    try {
-      const res = await fetch('/api/classes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'create', ...row }),
-      })
-      const data = await res.json().catch(() => ({}))
-      if (!res.ok || data.status !== 'success') {
-        skipped.push({ code: row.code, reason: data.message || 'Lỗi không xác định' })
-      } else {
-        inserted++
-      }
-    } catch (error) {
-      skipped.push({ code: row.code, reason: 'Không kết nối được máy chủ' })
-    }
-  }
-  bulkResult.value = {
-    inserted_count: inserted,
-    skipped_count: skipped.length,
-    skipped,
-  }
-  step.value = 'bulk-done'
-  saving.value = false
-}
 
+  try {
+    const res = await fetch('/api/classes?action=save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rows: bulkRows.value }),
+    })
+
+    const data = await res.json().catch(() => ({}))
+
+    if (!res.ok || data.status !== 'success') {
+      serverMessage.value = data.message || 'Không thể lưu danh sách lớp.'
+      return
+    }
+
+    bulkResult.value = {
+      inserted_count: data.inserted_count || 0,
+      skipped_count: data.skipped_count || 0,
+      skipped: Array.isArray(data.skipped) ? data.skipped : [],
+    }
+    step.value = 'bulk-done'
+  } catch (error) {
+    serverMessage.value = 'Không kết nối được máy chủ.'
+  } finally {
+    saving.value = false
+  }
+}
 onMounted(checkPermission)
 </script>
 
@@ -421,6 +410,8 @@ onMounted(checkPermission)
         <h2>Xác nhận nhập file lớp</h2>
         <p><b>File:</b> {{ bulkFileName }}</p>
         <p><b>Số dòng hợp lệ:</b> {{ bulkRows.length }}</p>
+        <p v-if="bulkSkipped.length > 0" class="warning">⚠️ <b>Số dòng bỏ qua:</b> {{ bulkSkipped.length }}</p>
+
         <div class="preview-table-wrap">
           <table class="preview-table">
             <thead>
@@ -429,6 +420,7 @@ onMounted(checkPermission)
                 <th>Tên lớp</th>
                 <th>Mã ngành</th>
                 <th>GVCN</th>
+      
                 <th>Niên khóa</th>
               </tr>
             </thead>
@@ -437,12 +429,34 @@ onMounted(checkPermission)
                 <td>{{ row.code }}</td>
                 <td>{{ row.name }}</td>
                 <td>{{ row.major_code }}</td>
-                <td>{{ row.head_teacher_code || '-' }}</td>
+          
+                <td>{{ row.head_teacher_name || '-' }}</td>
                 <td>{{ row.school_year || '-' }}</td>
               </tr>
             </tbody>
           </table>
         </div>
+
+        <div v-if="bulkSkipped.length > 0" class="skipped-section">
+          <h3>Dòng bỏ qua</h3>
+          <table class="skipped-table">
+            <thead>
+              <tr>
+                <th>Dòng</th>
+                <th>Mã lớp</th>
+                <th>Lý do</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(skip, idx) in bulkSkipped" :key="idx">
+                <td>{{ skip.line }}</td>
+                <td>{{ skip.code || '-' }}</td>
+                <td>{{ skip.reason }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
         <p v-if="serverMessage" class="error">{{ serverMessage }}</p>
         <div class="actions">
           <button class="btn-primary" :disabled="saving" @click="submitBulkImport">
@@ -612,6 +626,45 @@ button {
   position: sticky;
   top: 0;
   z-index: 2;
+}
+
+.warning {
+  color: #ff9800;
+  font-size: 14px;
+  margin: 8px 0;
+}
+
+.skipped-section {
+  margin-top: 20px;
+  border: 1px solid #ffd9d9;
+  border-radius: 8px;
+  padding: 16px;
+  background: #fff5f5;
+}
+
+.skipped-section h3 {
+  margin-top: 0;
+  color: #c0392b;
+  font-size: 16px;
+}
+
+.skipped-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.skipped-table th,
+.skipped-table td {
+  border-bottom: 1px solid #ffe0e0;
+  padding: 8px;
+  text-align: left;
+}
+
+.skipped-table th {
+  background: #ffeaea;
+  color: #c0392b;
+  font-weight: 600;
 }
 
 @media (max-width: 760px) {
