@@ -51,7 +51,6 @@ describe('Update detail screens E2E', () => {
           fieldByLabel('Họ tên *').find('input').clear().type('Updated Teacher')
           fieldByLabel('Khoa *').find('select').select('Toán - Cơ - Tin')
           fieldByLabel('Email').find('input').clear().type('updated.teacher@example.test')
-          cy.contains('label', 'Lớp phụ trách').next('input').clear().type('CTK43')
           cy.contains('button', 'Xác nhận').click()
 
           cy.contains('h2', 'Xác nhận thông tin cập nhật').should('be.visible')
