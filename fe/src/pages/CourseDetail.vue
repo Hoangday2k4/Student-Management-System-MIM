@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -26,7 +26,6 @@ const scoreForm = ref({
   gk: '',
   ck: '',
 })
-const savingWeights = ref(false)
 
 // Weight management states
 const showWeightModal = ref(false)
@@ -41,8 +40,6 @@ const weightForm = ref({
   weight_ck: 0.6
 })
 
-// Lock/Expire states
-const adminDeadlineEdit = ref('')
 
 const isStaff = computed(() => accountType.value === 'staff')
 const isTeacher = computed(() => accountType.value === 'teacher')
@@ -140,13 +137,6 @@ function goUpdate() {
     return
   }
   router.push({ path: '/courses/update', query: { id: String(course.value.id), ...searchQuery.value } })
-}
-
-// Format ngày tháng hiển thị cho đẹp (DD/MM/YYYY HH:mm)
-function formatDateTimeDisplay(dateString) {
-  if (!dateString) return ''
-  const d = new Date(dateString)
-  return d.toLocaleString('vi-VN', { dateStyle: 'short', timeStyle: 'short' })
 }
 
 // Tính toán phần trăm tiến độ dựa trên deadline

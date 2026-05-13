@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -35,69 +35,6 @@ const errors = reactive({
   major_code: '',
 })
 
-function normalizeKey(input) {
-  return String(input || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/g, 'd')
-    .replace(/Đ/g, 'D')
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '')
-}
-
-function csvToRows(text) {
-  const rows = []
-  let row = []
-  let value = ''
-  let i = 0
-  let inQuotes = false
-  while (i < text.length) {
-    const ch = text[i]
-    const next = text[i + 1]
-    if (inQuotes) {
-      if (ch === '"' && next === '"') {
-        value += '"'
-        i += 2
-        continue
-      }
-      if (ch === '"') {
-        inQuotes = false
-        i++
-        continue
-      }
-      value += ch
-      i++
-      continue
-    }
-    if (ch === '"') {
-      inQuotes = true
-      i++
-      continue
-    }
-    if (ch === ',') {
-      row.push(value.trim())
-      value = ''
-      i++
-      continue
-    }
-    if (ch === '\n' || ch === '\r') {
-      if (ch === '\r' && next === '\n') i++
-      row.push(value.trim())
-      rows.push(row)
-      row = []
-      value = ''
-      i++
-      continue
-    }
-    value += ch
-    i++
-  }
-  if (value.length > 0 || row.length > 0) {
-    row.push(value.trim())
-    rows.push(row)
-  }
-  return rows.filter((r) => r.some((cell) => String(cell).trim() !== ''))
-}
 
 function resetErrors() {
   errors.code = ''

@@ -1,4 +1,4 @@
-<script setup>
+﻿<script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -189,53 +189,6 @@ function buildQuery() {
   params.append('mode', 'subject')
   if (filters.keyword.trim()) params.append('keyword', filters.keyword.trim())
   return params.toString()
-}
-
-// Tính toán phần trăm tiến độ dựa trên deadline
-function getProgressPercentage(course) {
-  // Progress only shown when course is started
-  if (!course?.IsStarted) return 0
-  if (!course?.NgayHetHan) return 0
-  
-  const now = Date.now()
-  const deadline = new Date(course.NgayHetHan).getTime()
-  
-  // Progress starts from when course is marked as started
-  // Use StartedAt if available (time when IsStarted = 1 first set), otherwise use created_at
-  let startTime
-  if (course.StartedAt) {
-    startTime = new Date(course.StartedAt).getTime()
-  } else if (course.created_at) {
-    startTime = new Date(course.created_at).getTime()
-  } else {
-    // Default: 4 months before deadline
-    startTime = deadline - (4 * 30 * 24 * 60 * 60 * 1000)
-  }
-  
-  const total = deadline - startTime
-  const elapsed = now - startTime
-  const percentage = Math.max(0, Math.min(100, (elapsed / total) * 100))
-  
-  return Math.round(percentage)
-}
-
-// Tính thời gian còn lại
-function getRemainingTime(course) {
-  if (!course?.NgayHetHan) return ''
-  
-  const now = Date.now()
-  const deadline = new Date(course.NgayHetHan).getTime()
-  const diff = deadline - now
-  
-  if (diff <= 0) return 'ĐÃ KẾT THÚC'
-  
-  const days = Math.floor(diff / (24 * 60 * 60 * 1000))
-  const hours = Math.floor((diff % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000))
-  
-  if (days > 0) {
-    return `${days}d ${hours}h`
-  }
-  return `${hours}h`
 }
 
 async function doSearch() {
