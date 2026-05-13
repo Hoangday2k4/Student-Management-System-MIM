@@ -242,7 +242,6 @@ abstract class IntegrationTestCase extends TestCase
                 'email' => 't001@example.test',
                 'phone' => '',
                 'gender' => 'Nam',
-                'homeroom_class' => '',
                 'status' => 'Dang cong tac',
                 'avatar' => '',
             ]);
