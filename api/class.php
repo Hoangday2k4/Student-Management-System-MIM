@@ -20,6 +20,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    // Check if this is an import action
+    $action = strtolower(trim((string)($_GET['action'] ?? $_POST['action'] ?? '')));
+    if ($action === 'import' || strpos($action, 'preview') === 0 || $action === 'save') {
+        $controller->importBulk();
+        exit;
+    }
     $controller->save();
     exit;
 }
