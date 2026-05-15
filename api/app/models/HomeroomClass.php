@@ -1,10 +1,10 @@
-    <?php
+<?php
 
-    require_once __DIR__ . '/Faculty.php';
-    require_once __DIR__ . '/Major.php';
+require_once __DIR__ . '/Faculty.php';
+require_once __DIR__ . '/Major.php';
 
-    class HomeroomClass
-    {
+class HomeroomClass
+{
         private static function lowerText(string $value): string
         {
             $value = trim($value);
@@ -381,4 +381,4 @@
                 throw new RuntimeException('Không tìm thấy lớp để xóa.');
             }
         }
-    }
+}
