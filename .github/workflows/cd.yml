@@ -24,3 +24,4 @@ jobs:
             cd /var/www/html/mimsms
             chmod +x deploy.sh
             ./deploy.sh   
+            
