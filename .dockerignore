@@ -1,0 +1,11 @@
+.git
+.github
+node_modules
+fe/node_modules
+fe/dist
+fe/cypress
+*.md
+*.doc
+*.csv
+tests
+.claude

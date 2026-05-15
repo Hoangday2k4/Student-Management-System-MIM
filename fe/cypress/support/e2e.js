@@ -31,3 +31,13 @@ Cypress.Commands.add('mockLoginSuccess', () => {
 Cypress.Commands.add('mockLogout', () => {
   interceptFixture('POST', '**/api/logout', 'auth/logout.json', 'logout')
 })
+
+Cypress.Commands.add('mockChangePasswordSuccess', () => {
+  interceptFixture('POST', '**/api/change-password', 'auth/change-password-success.json', 'changePassword')
+})
+
+Cypress.Commands.add('mockAdminOrgData', () => {
+  interceptFixture('GET', '**/api/faculties*', 'admin/faculties.json', 'faculties')
+  interceptFixture('GET', '**/api/majors*', 'admin/majors.json', 'majors')
+  interceptFixture('GET', '**/api/classes*', 'admin/classes.json', 'classes')
+})

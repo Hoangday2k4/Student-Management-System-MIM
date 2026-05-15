@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "data": {
+    "id": 401,
+    "course_code": "INT301",
+    "course_name": "Mang may tinh",
+    "teacher_name": "Test Teacher",
+    "credits": 3,
+    "weight_cc": 20,
+    "weight_gk": 30,
+    "weight_ck": 50,
+    "student_code": "S001",
+    "student_name": "Test Student",
+    "class_name": "CTK42",
+    "cc": 8.5,
+    "gk": 7.0,
+    "ck": 9.0,
+    "score": 8.2,
+    "letter": "A"
+  }
+}

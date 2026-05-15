@@ -1,0 +1,36 @@
+{
+  "status": "success",
+  "rows": [
+    {
+      "student_code": "IMP001",
+      "full_name": "Import Student One",
+      "class_name": "CTK42",
+      "gender": "Nam",
+      "status": "Đang học",
+      "email": "imp001@import.test",
+      "phone": "",
+      "cccd": "",
+      "address": "",
+      "admission_date": "",
+      "major": "",
+      "faculty": "",
+      "date_of_birth": ""
+    },
+    {
+      "student_code": "IMP002",
+      "full_name": "Import Student Two",
+      "class_name": "CTK43",
+      "gender": "Nữ",
+      "status": "Đang học",
+      "email": "imp002@import.test",
+      "phone": "",
+      "cccd": "",
+      "address": "",
+      "admission_date": "",
+      "major": "",
+      "faculty": "",
+      "date_of_birth": ""
+    }
+  ],
+  "skipped_in_file": []
+}

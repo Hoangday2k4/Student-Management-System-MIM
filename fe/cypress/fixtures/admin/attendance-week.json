@@ -1,0 +1,23 @@
+{
+  "status": "success",
+  "data": {
+    "week_number": 1,
+    "total_lessons": 1,
+    "students": [
+      {
+        "student_code": "S001",
+        "full_name": "Test Student 1",
+        "class_name": "CTK42",
+        "is_absent_this_week": false,
+        "total_absences": 0
+      },
+      {
+        "student_code": "S002",
+        "full_name": "Test Student 2",
+        "class_name": "CTK42",
+        "is_absent_this_week": false,
+        "total_absences": 0
+      }
+    ]
+  }
+}

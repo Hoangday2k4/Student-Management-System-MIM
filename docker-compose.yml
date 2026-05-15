@@ -1,0 +1,47 @@
+services:
+
+  # ── Frontend: Vue 3 + Vite → Nginx ────────────────────────────────────────
+  frontend:
+    build:
+      context: ./fe
+      dockerfile: Dockerfile
+      args:
+        VITE_BASE_URL: /mimsms/
+    ports:
+      - "3000:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: always
+    networks:
+      - mimsms-net
+
+  # ── Backend: PHP 8.2-FPM + SQLite ─────────────────────────────────────────
+  backend:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    volumes:
+      - sqlite_data:/var/www/html/storage
+      - session_data:/var/php/sessions
+    environment:
+      - CORS_ALLOWED_ORIGIN=http://118.70.176.240
+    restart: always
+    networks:
+      - mimsms-net
+    healthcheck:
+      test: ["CMD", "php-fpm", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+# ── Persistent storage ────────────────────────────────────────────────────────
+volumes:
+  sqlite_data:
+  session_data:
+
+# ── Internal network ─────────────────────────────────────────────────────────
+networks:
+  mimsms-net:
+    driver: bridge

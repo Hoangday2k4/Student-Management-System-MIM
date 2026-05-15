@@ -1,0 +1,18 @@
+{
+  "status": "success",
+  "rows": [
+    {
+      "teacher_code": "TIMP001",
+      "full_name": "Import Teacher One",
+      "department": "CNTT",
+      "gender": "Nam",
+      "status": "Đang công tác",
+      "email": "timp001@import.test",
+      "phone": "",
+      "academic_title": "ThS",
+      "date_of_birth": "",
+      "avatar": ""
+    }
+  ],
+  "skipped_in_file": []
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "code": "CTK42",
+    "name": "CTK42",
+    "major_code": "KTPM",
+    "major_name": "Kỹ thuật Phần mềm",
+    "faculty_name": "Công nghệ Thông tin",
+    "head_teacher_code": "T001",
+    "head_teacher_name": "Test Teacher",
+    "student_count": 35
+  },
+  {
+    "code": "CTK43",
+    "name": "CTK43",
+    "major_code": "HTTT",
+    "major_name": "Hệ thống Thông tin",
+    "faculty_name": "Công nghệ Thông tin",
+    "head_teacher_code": "T001",
+    "head_teacher_name": "Test Teacher",
+    "student_count": 28
+  }
+]

@@ -1,0 +1,16 @@
+[
+  {
+    "code": "KTPM",
+    "name": "Kỹ thuật Phần mềm",
+    "faculty_code": "CNTT",
+    "faculty_name": "Công nghệ Thông tin",
+    "class_count": 5
+  },
+  {
+    "code": "HTTT",
+    "name": "Hệ thống Thông tin",
+    "faculty_code": "CNTT",
+    "faculty_name": "Công nghệ Thông tin",
+    "class_count": 3
+  }
+]

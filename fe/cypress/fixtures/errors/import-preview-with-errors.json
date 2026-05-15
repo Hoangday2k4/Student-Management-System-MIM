@@ -1,0 +1,16 @@
+{
+  "status": "success",
+  "rows": [],
+  "skipped_in_file": [
+    {
+      "line": 2,
+      "student_code": "",
+      "reason": "Thiếu mã sinh viên"
+    },
+    {
+      "line": 3,
+      "student_code": "BAD001",
+      "reason": "Email không hợp lệ: not-an-email"
+    }
+  ]
+}

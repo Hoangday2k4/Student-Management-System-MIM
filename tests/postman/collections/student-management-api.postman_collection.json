@@ -262,6 +262,255 @@
           ] } }]
         }
       ]
+    },
+
+    {
+      "name": "=== Part 8: Student & Teacher detail (single record) ===",
+      "item": [
+        {
+          "name": "Admin - Login (refresh session)",
+          "request": { "method": "POST", "header": [], "body": { "mode": "urlencoded", "urlencoded": [{"key":"login_id","value":"{{admin_user}}"},{"key":"password","value":"{{admin_pass}}"}] },
+            "url": { "raw": "{{base_url}}/login.php", "host": ["{{base_url}}"], "path": ["login.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('re-login returns 200', () => pm.response.to.have.status(200));",
+            "var c = pm.response.headers.get('Set-Cookie'); if (c) { var m = c.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_admin', m[0]); }"
+          ] } }]
+        },
+        {
+          "name": "Admin - Get student detail S001",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/student_detail.php?student_code={{student_code}}", "host": ["{{base_url}}"], "path": ["student_detail.php"], "query": [{"key":"student_code","value":"{{student_code}}"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('student detail returns 200', () => pm.response.to.have.status(200));",
+            "pm.test('student detail has data', () => { var b = pm.response.json(); pm.expect(b.status).to.equal('success'); pm.expect(b.data).to.have.property('student_code'); });"
+          ] } }]
+        },
+        {
+          "name": "Admin - Get student detail not found → 404",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/student_detail.php?student_code=SV-KHONG-TON-TAI", "host": ["{{base_url}}"], "path": ["student_detail.php"], "query": [{"key":"student_code","value":"SV-KHONG-TON-TAI"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('missing student returns 404', () => { pm.expect(pm.response.code).to.be.oneOf([400, 404]); });"
+          ] } }]
+        },
+        {
+          "name": "Admin - Get teacher detail T001",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/teacher_detail.php?teacher_code={{teacher_code}}", "host": ["{{base_url}}"], "path": ["teacher_detail.php"], "query": [{"key":"teacher_code","value":"{{teacher_code}}"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('teacher detail returns 200', () => pm.response.to.have.status(200));",
+            "pm.test('teacher detail has data', () => { var b = pm.response.json(); pm.expect(b.status).to.equal('success'); pm.expect(b.data).to.have.property('teacher_code'); });"
+          ] } }]
+        },
+        {
+          "name": "Admin - Get teacher detail not found → 404",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/teacher_detail.php?teacher_code=GV-KHONG-TON-TAI", "host": ["{{base_url}}"], "path": ["teacher_detail.php"], "query": [{"key":"teacher_code","value":"GV-KHONG-TON-TAI"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('missing teacher returns 404', () => { pm.expect(pm.response.code).to.be.oneOf([400, 404]); });"
+          ] } }]
+        }
+      ]
+    },
+
+    {
+      "name": "=== Part 9: Faculty / Major / Class CRUD ===",
+      "item": [
+        {
+          "name": "Admin - Create Faculty",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": [
+              "pm.environment.set('test_faculty_code', 'KTEST' + Math.floor(Math.random()*9000+1000));"
+            ] } },
+            { "listen": "test", "script": { "exec": [
+              "pm.test('create faculty returns 200', () => pm.response.to.have.status(200));",
+              "pm.test('create faculty body success', () => { var b = pm.response.json(); pm.expect(b.status).to.equal('success'); });"
+            ] } }
+          ],
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"action\":\"create\",\"code\":\"{{test_faculty_code}}\",\"name\":\"Khoa Test Newman\"}" },
+            "url": { "raw": "{{base_url}}/faculty.php", "host": ["{{base_url}}"], "path": ["faculty.php"] }
+          }
+        },
+        {
+          "name": "Admin - List faculties → 200",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/faculty.php", "host": ["{{base_url}}"], "path": ["faculty.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('faculty list returns 200', () => pm.response.to.have.status(200));"
+          ] } }]
+        },
+        {
+          "name": "Admin - Create Faculty duplicate → 409",
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"action\":\"create\",\"code\":\"{{test_faculty_code}}\",\"name\":\"Khoa Duplicate\"}" },
+            "url": { "raw": "{{base_url}}/faculty.php", "host": ["{{base_url}}"], "path": ["faculty.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('duplicate faculty returns 409', () => pm.response.to.have.status(409));"
+          ] } }]
+        },
+        {
+          "name": "Admin - Create Major",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": [
+              "pm.environment.set('test_major_code', 'NTEST' + Math.floor(Math.random()*9000+1000));"
+            ] } },
+            { "listen": "test", "script": { "exec": [
+              "pm.test('create major returns 200', () => pm.response.to.have.status(200));",
+              "pm.test('create major body success', () => { var b = pm.response.json(); pm.expect(b.status).to.equal('success'); });"
+            ] } }
+          ],
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"action\":\"create\",\"code\":\"{{test_major_code}}\",\"name\":\"Nganh Test Newman\",\"faculty_code\":\"{{test_faculty_code}}\"}" },
+            "url": { "raw": "{{base_url}}/major.php", "host": ["{{base_url}}"], "path": ["major.php"] }
+          }
+        },
+        {
+          "name": "Admin - Create Class",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": [
+              "pm.environment.set('test_class_code', 'LTEST' + Math.floor(Math.random()*9000+1000));"
+            ] } },
+            { "listen": "test", "script": { "exec": [
+              "pm.test('create class returns 200', () => pm.response.to.have.status(200));",
+              "pm.test('create class body success', () => { var b = pm.response.json(); pm.expect(b.status).to.equal('success'); });"
+            ] } }
+          ],
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"action\":\"create\",\"code\":\"{{test_class_code}}\",\"name\":\"Lop Test Newman\",\"major_code\":\"{{test_major_code}}\",\"head_teacher_code\":\"T001\"}" },
+            "url": { "raw": "{{base_url}}/class.php", "host": ["{{base_url}}"], "path": ["class.php"] }
+          }
+        },
+        {
+          "name": "Admin - Delete class → 200",
+          "request": { "method": "DELETE", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/class.php?code={{test_class_code}}", "host": ["{{base_url}}"], "path": ["class.php"], "query": [{"key":"code","value":"{{test_class_code}}"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('delete class returns 200', () => pm.response.to.have.status(200));"
+          ] } }]
+        },
+        {
+          "name": "Admin - Delete major → 200",
+          "request": { "method": "DELETE", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/major.php?code={{test_major_code}}", "host": ["{{base_url}}"], "path": ["major.php"], "query": [{"key":"code","value":"{{test_major_code}}"}] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('delete major returns 200', () => pm.response.to.have.status(200));"
+          ] } }]
+        },
+        {
+          "name": "Admin - Faculty missing code → 400",
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"action\":\"create\",\"name\":\"Faculty Without Code\"}" },
+            "url": { "raw": "{{base_url}}/faculty.php", "host": ["{{base_url}}"], "path": ["faculty.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('faculty create missing code returns 400', () => { pm.expect(pm.response.code).to.be.oneOf([400, 422]); });"
+          ] } }]
+        },
+        {
+          "name": "Student cannot create faculty → 403",
+          "event": [
+            { "listen": "prerequest", "script": { "exec": [
+              "pm.sendRequest({ url: pm.environment.get('INTEGRATION_BASE_URL') + '/login.php', method: 'POST', header: {'Content-Type': 'application/x-www-form-urlencoded'}, body: {mode: 'urlencoded', urlencoded: [{key:'login_id',value:'S001'},{key:'password',value:'123456'}]} }, function(err, res) { var c = res.headers.get('Set-Cookie'); if (c) { var m = c.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_student', m[0]); } });"
+            ] } },
+            { "listen": "test", "script": { "exec": [
+              "pm.test('student cannot create faculty', () => { pm.expect(pm.response.code).to.be.oneOf([401, 403]); });"
+            ] } }
+          ],
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_student}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"action\":\"create\",\"code\":\"FORBID\",\"name\":\"Forbidden Faculty\"}" },
+            "url": { "raw": "{{base_url}}/faculty.php", "host": ["{{base_url}}"], "path": ["faculty.php"] }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "=== Part 10: Change Password ===",
+      "item": [
+        {
+          "name": "Change Password - wrong old password → 400",
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"old_password\":\"wrong-pass\",\"new_password\":\"newpass123\",\"confirm_password\":\"newpass123\"}" },
+            "url": { "raw": "{{base_url}}/change-password", "host": ["{{base_url}}"], "path": ["change-password"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('wrong old password returns 400', () => { pm.expect(pm.response.code).to.be.oneOf([400, 401, 422]); });"
+          ] } }]
+        },
+        {
+          "name": "Change Password - confirm mismatch → 400",
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"{{session_admin}}"},{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"old_password\":\"123456\",\"new_password\":\"newpass123\",\"confirm_password\":\"different456\"}" },
+            "url": { "raw": "{{base_url}}/change-password", "host": ["{{base_url}}"], "path": ["change-password"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('confirm mismatch returns 400', () => { pm.expect(pm.response.code).to.be.oneOf([400, 422]); });"
+          ] } }]
+        },
+        {
+          "name": "Change Password - unauthenticated → 401",
+          "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}],
+            "body": { "mode": "raw", "raw": "{\"old_password\":\"123456\",\"new_password\":\"newpass123\",\"confirm_password\":\"newpass123\"}" },
+            "url": { "raw": "{{base_url}}/change-password", "host": ["{{base_url}}"], "path": ["change-password"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('unauthenticated change-password returns 401', () => pm.response.to.have.status(401));"
+          ] } }]
+        }
+      ]
+    },
+
+    {
+      "name": "=== Part 11: Score access control ===",
+      "item": [
+        {
+          "name": "Login - Student S001 (refresh)",
+          "request": { "method": "POST", "header": [], "body": { "mode": "urlencoded", "urlencoded": [{"key":"login_id","value":"{{student_user}}"},{"key":"password","value":"{{student_pass}}"}] },
+            "url": { "raw": "{{base_url}}/login.php", "host": ["{{base_url}}"], "path": ["login.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('student login returns 200', () => pm.response.to.have.status(200));",
+            "var c = pm.response.headers.get('Set-Cookie'); if (c) { var m = c.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_student', m[0]); }"
+          ] } }]
+        },
+        {
+          "name": "Student - Get own scores → 200",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_student}}"}],
+            "url": { "raw": "{{base_url}}/score.php", "host": ["{{base_url}}"], "path": ["score.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('student can access scores', () => pm.response.to.have.status(200));"
+          ] } }]
+        },
+        {
+          "name": "Admin - Cannot access score endpoint → 403",
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
+            "url": { "raw": "{{base_url}}/score.php", "host": ["{{base_url}}"], "path": ["score.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('admin cannot access score endpoint', () => pm.response.to.have.status(403));"
+          ] } }]
+        },
+        {
+          "name": "Unauthenticated - Score → 401",
+          "request": { "method": "GET", "header": [],
+            "url": { "raw": "{{base_url}}/score.php", "host": ["{{base_url}}"], "path": ["score.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "pm.test('unauthenticated score returns 401', () => pm.response.to.have.status(401));"
+          ] } }]
+        }
+      ]
     }
 
   ]

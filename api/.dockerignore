@@ -1,0 +1,6 @@
+vendor
+tests
+*.md
+.git
+.gitignore
+phpunit.xml

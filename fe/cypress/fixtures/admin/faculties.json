@@ -1,0 +1,14 @@
+[
+  {
+    "code": "CNTT",
+    "name": "Công nghệ Thông tin",
+    "major_count": 3,
+    "teacher_count": 12
+  },
+  {
+    "code": "TOAN",
+    "name": "Toán - Cơ - Tin",
+    "major_count": 2,
+    "teacher_count": 8
+  }
+]
