@@ -6,7 +6,8 @@ DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DEPLOY_DIR"
 
 echo "==> [1/4] Pulling latest code..."
-git pull origin main
+git fetch origin main
+git reset --hard origin/main
 
 # Copy .htaccess vào thư mục web
 cp docker/htaccess-mimsms /var/www/html/mimsms/.htaccess
