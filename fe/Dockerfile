@@ -9,6 +9,7 @@ RUN npm install -g pnpm@9
 # Copy lockfile + manifest first for layer caching
 COPY package.json pnpm-lock.yaml ./
 
+ENV CYPRESS_INSTALL_BINARY=0
 RUN pnpm install --frozen-lockfile
 
 # Copy source and build

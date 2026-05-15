@@ -19,6 +19,7 @@ jobs:
           port: 2218
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           debug: true
+          command_timeout: 30m
           script: |
             set -euo pipefail
             cd /var/www/html/mimsms
