@@ -16,7 +16,7 @@ jobs:
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
-          port: ${{ secrets.SERVER_PORT }}
+          port: 2218
           password: ${{ secrets.SERVER_PASSWORD }}
           script: |
             set -euo pipefail
