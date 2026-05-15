@@ -22,4 +22,4 @@ jobs:
             set -euo pipefail
             cd /var/www/html/mimsms
             chmod +x deploy.sh
-            ./deploy.sh
+            ./deploy.sh 
