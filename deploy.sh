@@ -5,21 +5,17 @@ set -euo pipefail
 DEPLOY_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$DEPLOY_DIR"
 
-echo "==> [1/4] Pulling latest code..."
-git fetch origin main
-git reset --hard origin/main
-
 # Copy .htaccess vào thư mục web
 cp docker/htaccess-mimsms /var/www/html/mimsms/.htaccess
 
-echo "==> [2/4] Building images..."
+echo "==> [1/3] Building images..."
 docker compose build
 
-echo "==> [3/4] Restarting containers..."
+echo "==> [2/3] Restarting containers..."
 docker compose down --remove-orphans
 docker compose up -d
 
-echo "==> [4/4] Pruning dangling images..."
+echo "==> [3/3] Pruning dangling images..."
 docker image prune -f
 
 echo ""

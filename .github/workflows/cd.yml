@@ -23,6 +23,8 @@ jobs:
           script: |
             set -euo pipefail
             cd /var/www/html/mimsms
+            git fetch origin main
+            git reset --hard origin/main
             chmod +x deploy.sh
-            ./deploy.sh   
+            ./deploy.sh
             
