@@ -5,6 +5,7 @@ return [
         '/home' => ['/home.php', null, null],
         '/get_config' => ['/get_config.php', null, null],
         '/reset_list' => ['/reset_list.php', null, null],
+        '/reset_list.php' => ['/reset_list.php', null, null],
         '/students' => ['/student.php', null, null],
         '/students/import' => ['/student_import.php', null, null],
         '/students/detail' => ['/student_detail.php', null, null],
