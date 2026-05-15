@@ -8,6 +8,9 @@ cd "$DEPLOY_DIR"
 echo "==> [1/5] Pulling latest code..."
 git pull origin main
 
+# Copy .htaccess vào thư mục web
+cp docker/htaccess-mimsms /var/www/html/mimsms/.htaccess
+
 echo "==> [2/5] Stopping containers..."
 docker compose down --remove-orphans
 
