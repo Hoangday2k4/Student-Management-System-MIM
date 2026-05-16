@@ -53,7 +53,17 @@ async function loadDetail() {
   }
 }
 
-onMounted(loadDetail)
+onMounted(async () => {
+  const homeRes = await fetch('/api/home').catch(() => null)
+  if (homeRes && homeRes.ok) {
+    const homeData = await homeRes.json().catch(() => ({}))
+    if ((homeData.account_type || '') !== 'student') {
+      router.replace('/')
+      return
+    }
+  }
+  await loadDetail()
+})
 </script>
 
 <template>

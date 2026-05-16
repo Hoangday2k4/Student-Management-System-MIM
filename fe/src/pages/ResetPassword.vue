@@ -21,6 +21,15 @@ const fetchList = async () => {
   loading.value = true
   loadError.value = ''
   try {
+    const homeRes = await fetch(`${apiBase}/home`)
+    if (homeRes.ok) {
+      const homeData = await homeRes.json().catch(() => ({}))
+      if ((homeData.account_type || '') !== 'staff') {
+        router.replace('/')
+        return
+      }
+    }
+
     const response = await fetch(`${apiBase}/reset_list.php`)
     const payload = await response.json()
     if (response.status === 401 || response.status === 403) {

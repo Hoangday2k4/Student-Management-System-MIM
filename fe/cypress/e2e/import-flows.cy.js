@@ -10,16 +10,15 @@ describe('Import Flows E2E (Student & Teacher CSV)', () => {
 
   it('admin can preview and save student CSV import', () => {
     cy.fixture('admin/import-preview-students.json').then((preview) => {
-      cy.intercept('POST', '**/api/student_import*', (req) => {
-        const url = new URL(req.url)
-        if (url.searchParams.get('action') === 'preview') {
-          req.reply({ statusCode: 200, body: preview })
-        } else {
-          cy.fixture('admin/import-save-success.json').then((saved) => {
+      cy.fixture('admin/import-save-success.json').then((saved) => {
+        cy.intercept('POST', '**/api/student_import*', (req) => {
+          const url = new URL(req.url)
+          if (url.searchParams.get('action') === 'preview') {
+            req.reply({ statusCode: 200, body: preview })
+          } else {
             req.reply({ statusCode: 200, body: saved })
-          })
-        }
-      }).as('studentImport')
+          }
+        }).as('studentImport')
 
       cy.visit('/students/import')
 
@@ -51,6 +50,7 @@ describe('Import Flows E2E (Student & Teacher CSV)', () => {
       cy.wait('@studentImport')
       cy.contains(/thành công|success|đã nhập/i).should('be.visible')
       cy.contains('2').should('be.visible')
+      })
     })
   })
 

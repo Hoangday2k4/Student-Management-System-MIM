@@ -196,16 +196,17 @@ async function handleLogout() {
     <div class="layout">
       <aside class="sidebar">
         <div class="menu-title">CHỨC NĂNG</div>
-        <button
+        <a
           v-for="item in menuItems"
           :key="item.key"
           class="menu-item"
           :class="{ active: isActive(item.key) }"
-          @click="router.push(item.to)"
+          href="#"
+          @click.prevent="router.push(item.to)"
         >
           <span class="menu-item-label">{{ item.label }}</span>
           <span v-if="item.desc" class="menu-item-desc">{{ item.desc }}</span>
-        </button>
+        </a>
       </aside>
 
       <main class="content">
@@ -217,13 +218,12 @@ async function handleLogout() {
 
 <style scoped>
 .portal-page {
-  height: 100vh;
+  min-height: 100vh;
   background: #efefef;
   color: #1a1a1a;
   font-family: Tahoma, Arial, sans-serif;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
 }
 
 .portal-header {
@@ -282,7 +282,7 @@ async function handleLogout() {
   grid-template-columns: 260px 1fr;
   min-height: 0;
   flex: 1;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .sidebar {
@@ -340,10 +340,8 @@ async function handleLogout() {
 
 .content {
   padding: 14px;
-  overflow: auto;
+  overflow: visible;
   min-height: 0;
-  scrollbar-width: thin;
-  scrollbar-color: #888 #f1f1f1;
 }
 
 .content::-webkit-scrollbar {
@@ -398,8 +396,6 @@ async function handleLogout() {
 :global(html),
 :global(body),
 :global(#app) {
-  height: 100%;
   margin: 0;
-  overflow: hidden;
 }
 </style>

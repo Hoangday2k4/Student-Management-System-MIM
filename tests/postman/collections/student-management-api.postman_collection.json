@@ -420,7 +420,7 @@
           "name": "Student cannot create faculty → 403",
           "event": [
             { "listen": "prerequest", "script": { "exec": [
-              "pm.sendRequest({ url: pm.environment.get('INTEGRATION_BASE_URL') + '/login.php', method: 'POST', header: {'Content-Type': 'application/x-www-form-urlencoded'}, body: {mode: 'urlencoded', urlencoded: [{key:'login_id',value:'S001'},{key:'password',value:'123456'}]} }, function(err, res) { var c = res.headers.get('Set-Cookie'); if (c) { var m = c.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_student', m[0]); } });"
+              "pm.sendRequest({ url: pm.environment.get('INTEGRATION_BASE_URL') + '/login.php', method: 'POST', header: {'Content-Type': 'application/x-www-form-urlencoded', 'Cookie': 'PHPSESSID=fresh_student_session_prereq'}, body: {mode: 'urlencoded', urlencoded: [{key:'login_id',value:'S001'},{key:'password',value:'123456'}]} }, function(err, res) { var c = res.headers.get('Set-Cookie'); if (c) { var m = c.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_student', m[0]); } });"
             ] } },
             { "listen": "test", "script": { "exec": [
               "pm.test('student cannot create faculty', () => { pm.expect(pm.response.code).to.be.oneOf([401, 403]); });"
@@ -459,7 +459,7 @@
         },
         {
           "name": "Change Password - unauthenticated → 401",
-          "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"}],
+          "request": { "method": "POST", "header": [{"key":"Content-Type","value":"application/json"},{"key":"Cookie","value":"PHPSESSID=no_session_unauthenticated"}],
             "body": { "mode": "raw", "raw": "{\"old_password\":\"123456\",\"new_password\":\"newpass123\",\"confirm_password\":\"newpass123\"}" },
             "url": { "raw": "{{base_url}}/change-password", "host": ["{{base_url}}"], "path": ["change-password"] }
           },
@@ -475,7 +475,7 @@
       "item": [
         {
           "name": "Login - Student S001 (refresh)",
-          "request": { "method": "POST", "header": [], "body": { "mode": "urlencoded", "urlencoded": [{"key":"login_id","value":"{{student_user}}"},{"key":"password","value":"{{student_pass}}"}] },
+          "request": { "method": "POST", "header": [{"key":"Cookie","value":"PHPSESSID=fresh_student_session_part11"}], "body": { "mode": "urlencoded", "urlencoded": [{"key":"login_id","value":"{{student_user}}"},{"key":"password","value":"{{student_pass}}"}] },
             "url": { "raw": "{{base_url}}/login.php", "host": ["{{base_url}}"], "path": ["login.php"] }
           },
           "event": [{ "listen": "test", "script": { "exec": [
@@ -493,6 +493,15 @@
           ] } }]
         },
         {
+          "name": "Admin - Re-login before score test",
+          "request": { "method": "POST", "header": [], "body": { "mode": "urlencoded", "urlencoded": [{"key":"login_id","value":"{{admin_user}}"},{"key":"password","value":"{{admin_pass}}"}] },
+            "url": { "raw": "{{base_url}}/login.php", "host": ["{{base_url}}"], "path": ["login.php"] }
+          },
+          "event": [{ "listen": "test", "script": { "exec": [
+            "var c = pm.response.headers.get('Set-Cookie'); if (c) { var m = c.match(/PHPSESSID=[^;]+/); if (m) pm.environment.set('session_admin', m[0]); }"
+          ] } }]
+        },
+        {
           "name": "Admin - Cannot access score endpoint → 403",
           "request": { "method": "GET", "header": [{"key":"Cookie","value":"{{session_admin}}"}],
             "url": { "raw": "{{base_url}}/score.php", "host": ["{{base_url}}"], "path": ["score.php"] }
@@ -503,7 +512,7 @@
         },
         {
           "name": "Unauthenticated - Score → 401",
-          "request": { "method": "GET", "header": [],
+          "request": { "method": "GET", "header": [{"key":"Cookie","value":"PHPSESSID=no_session_unauthenticated"}],
             "url": { "raw": "{{base_url}}/score.php", "host": ["{{base_url}}"], "path": ["score.php"] }
           },
           "event": [{ "listen": "test", "script": { "exec": [

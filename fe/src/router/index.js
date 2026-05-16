@@ -32,6 +32,8 @@ import CourseUpdate from '../pages/CourseUpdate.vue'
 import SubjectDetail from '../pages/SubjectDetail.vue'
 import SubjectForm from '../pages/SubjectForm.vue'
 import CourseMyList from '../pages/CourseMyList.vue'
+import StudentImport from '../pages/StudentImport.vue'
+import TeacherImport from '../pages/TeacherImport.vue'
 import CourseGrade from '../pages/CourseGrade.vue'
 import StudentScoreList from '../pages/StudentScoreList.vue'
 import StudentScoreDetail from '../pages/StudentScoreDetail.vue'
@@ -54,6 +56,8 @@ const routes = [
       { path: 'classes/detail', name: 'class-detail', component: ClassDetail, meta: { menuKey: 'class-manage' } },
       { path: 'classes/form', name: 'class-form', component: ClassForm, meta: { menuKey: 'class-manage' } },
       { path: 'reset-password', name: 'reset-password', component: ResetPassword },
+      { path: 'students/import', name: 'student-import', component: StudentImport, meta: { menuKey: 'student-search' } },
+      { path: 'teachers/import', name: 'teacher-import', component: TeacherImport, meta: { menuKey: 'teacher-search' } },
       { path: 'students/create', name: 'student-create', component: StudentCreate, meta: { menuKey: 'student-search' } },
       { path: 'students/edit', name: 'student-admin-edit', component: StudentAdminEdit, meta: { menuKey: 'student-search' } },
       { path: 'students/search', name: 'student-search', component: StudentSearch, meta: { menuKey: 'student-search' } },

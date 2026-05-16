@@ -52,17 +52,16 @@ describe('Course Detail (Section Detail) E2E', () => {
   it('admin can open and submit attendance for a lesson', () => {
     cy.mockHomeAsAdmin()
     cy.fixture('admin/course-detail.json').then((detail) => {
-      cy.intercept('GET', '**/api/courses/detail*', (req) => {
-        if (!req.query.action) {
-          req.reply({ statusCode: 200, body: detail })
-          return
-        }
-        if (req.query.action === 'attendance') {
-          cy.fixture('admin/attendance-week.json').then((att) => {
+      cy.fixture('admin/attendance-week.json').then((att) => {
+        cy.intercept('GET', '**/api/courses/detail*', (req) => {
+          if (!req.query.action) {
+            req.reply({ statusCode: 200, body: detail })
+            return
+          }
+          if (req.query.action === 'attendance') {
             req.reply({ statusCode: 200, body: att })
-          })
-        }
-      }).as('courseDetailOrAtt')
+          }
+        }).as('courseDetailOrAtt')
 
       cy.intercept('POST', '**/api/courses/detail*', (req) => {
         req.reply({ statusCode: 200, body: { status: 'success' } })
@@ -80,6 +79,7 @@ describe('Course Detail (Section Detail) E2E', () => {
 
       cy.wait('@coursePost')
       cy.contains(/thành công|success/i).should('be.visible')
+      })
     })
   })
 

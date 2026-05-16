@@ -30,7 +30,7 @@ function validate() {
   let ok = true
 
   if (!form.old_password) {
-    errors.old_password = 'Hãy nhập mật khẩu cũ.'
+    errors.old_password = 'Hãy nhập mật khẩu hiện tại.'
     ok = false
   }
   if (!form.new_password) {
@@ -44,7 +44,7 @@ function validate() {
     errors.confirm_password = 'Hãy nhập lại mật khẩu mới.'
     ok = false
   } else if (form.confirm_password !== form.new_password) {
-    errors.confirm_password = 'Mật khẩu nhập lại không khớp.'
+    errors.confirm_password = 'Mật khẩu xác nhận không khớp.'
     ok = false
   }
   if (form.old_password && form.new_password && form.old_password === form.new_password) {
@@ -78,7 +78,7 @@ async function submitForm() {
           if (errors[key] !== undefined) errors[key] = payload.fields[key]
         })
       }
-      serverError.value = payload.error || 'Không thể đổi mật khẩu.'
+      serverError.value = payload.message || payload.error || 'Không thể đổi mật khẩu.'
       return
     }
     done.value = true
@@ -99,7 +99,7 @@ async function submitForm() {
       </p>
 
       <div v-if="done" class="success-box">
-        <h2>Cập nhật thành công</h2>
+        <h2>Đổi mật khẩu thành công</h2>
         <p>Mật khẩu mới đã được lưu.</p>
         <button class="btn-primary" @click="router.push('/')">Về trang chủ</button>
       </div>
@@ -127,7 +127,7 @@ async function submitForm() {
 
         <div class="actions">
           <button class="btn-primary" type="submit" :disabled="submitting">
-            {{ submitting ? 'Đang cập nhật...' : 'Cập nhật mật khẩu' }}
+            {{ submitting ? 'Đang đổi mật khẩu...' : 'Đổi mật khẩu' }}
           </button>
           <button class="btn-ghost" type="button" @click="router.push('/')">Hủy</button>
         </div>

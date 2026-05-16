@@ -2,6 +2,13 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+async function checkStaffRole() {
+  const res = await fetch('/api/home').catch(() => null)
+  if (!res || !res.ok) return false
+  const data = await res.json().catch(() => ({}))
+  return (data.account_type || '') === 'staff'
+}
+
 const router = useRouter()
 const STATUS_OPTIONS = ['Hoạt động', 'Tạm nghỉ', 'Dừng hoạt động']
 
@@ -124,13 +131,14 @@ async function loadData() {
     const url = params.toString() ? `/api/faculties?${params.toString()}` : '/api/faculties'
     const res = await fetch(url)
     const payload = await res.json().catch(() => ({}))
-    if (!res.ok || payload.status !== 'success') {
-      errorMessage.value = payload.message || 'Không thể tải danh sách khoa.'
+    if (!res.ok) {
+      errorMessage.value = (payload && payload.message) || 'Không thể tải danh sách khoa.'
       rows.value = []
       return
     }
 
-    rows.value = (Array.isArray(payload.data) ? payload.data : []).map((item) => ({
+    const listData = Array.isArray(payload) ? payload : (Array.isArray(payload.data) ? payload.data : [])
+    rows.value = listData.map((item) => ({
       ...item,
       status: normalizeStatus(String(item?.status || '')),
     }))
@@ -171,7 +179,11 @@ async function deleteFaculty(row) {
   }
 }
 
-onMounted(loadData)
+onMounted(async () => {
+  const isStaff = await checkStaffRole()
+  if (!isStaff) { router.replace('/'); return }
+  await loadData()
+})
 </script>
 
 <template>
@@ -265,7 +277,7 @@ onMounted(loadData)
                     class="icon-btn danger-btn"
                     type="button"
                     :disabled="deletingCode === row.code"
-                    title="Xóa khoa"
+                    title="Xóa"
                     @click="deleteFaculty(row)"
                   >
                     <svg viewBox="0 0 16 16" aria-hidden="true">

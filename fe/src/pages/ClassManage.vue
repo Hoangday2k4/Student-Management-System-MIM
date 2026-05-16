@@ -2,6 +2,13 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
+async function checkStaffRole() {
+  const res = await fetch('/api/home').catch(() => null)
+  if (!res || !res.ok) return false
+  const data = await res.json().catch(() => ({}))
+  return (data.account_type || '') === 'staff'
+}
+
 const router = useRouter()
 
 const loading = ref(false)
@@ -56,12 +63,12 @@ async function loadData() {
     const url = params.toString() ? `/api/classes?${params.toString()}` : '/api/classes'
     const res = await fetch(url)
     const payload = await res.json().catch(() => ({}))
-    if (!res.ok || payload.status !== 'success') {
-      errorMessage.value = payload.message || 'Không thể tải danh sách lớp.'
+    if (!res.ok) {
+      errorMessage.value = (payload && payload.message) || 'Không thể tải danh sách lớp.'
       rows.value = []
       return
     }
-    rows.value = Array.isArray(payload.data) ? payload.data : []
+    rows.value = Array.isArray(payload) ? payload : (Array.isArray(payload.data) ? payload.data : [])
     summary.total = Number(payload.summary?.total || 0)
     searched.value = true
   } catch (error) {
@@ -97,6 +104,8 @@ async function deleteClass(row) {
 }
 
 onMounted(async () => {
+  const isStaff = await checkStaffRole()
+  if (!isStaff) { router.replace('/'); return }
   const current = router.currentRoute.value
   if (typeof current.query.keyword === 'string') {
     filters.keyword = current.query.keyword
@@ -110,7 +119,7 @@ onMounted(async () => {
     <div class="card">
       <div class="header-row">
         <div>
-          <h1>Quản lý lớp</h1>
+          <h1>Quản lý lớp sinh hoạt</h1>
           <p class="subtitle">Quản lý danh sách các lớp học.</p>
         </div>
         <button class="btn-add" type="button" @click="goCreate">+ Thêm lớp mới</button>
@@ -186,7 +195,7 @@ onMounted(async () => {
                     class="icon-btn danger-btn"
                     type="button"
                     :disabled="deletingCode === row.code"
-                    title="Xóa lớp"
+                    title="Xóa"
                     @click="deleteClass(row)"
                   >
                     <svg viewBox="0 0 16 16" aria-hidden="true">

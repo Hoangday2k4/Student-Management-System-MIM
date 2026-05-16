@@ -7,6 +7,7 @@ const router = useRouter()
 
 const loading = ref(true)
 const errorMessage = ref('')
+const successMessage = ref('')
 const accountType = ref('')
 const course = ref(null)
 const students = ref([])
@@ -340,7 +341,7 @@ async function saveAttendance() {
       }
     }
     showAttendanceModal.value = false
-    alert(payload.message || 'Lưu điểm danh thành công!')
+    successMessage.value = payload.message || 'Lưu điểm danh thành công!'
   } catch (error) {
     errorMessage.value = 'Không kết nối được máy chủ.'
   }
@@ -482,7 +483,8 @@ async function saveScore() {
       }
     }
     showScoreModal.value = false
-    
+    successMessage.value = payload.message || 'Lưu điểm thành công!'
+
     // Update student in list with scores and calculated total
     const idx = students.value.findIndex(s => s.student_code === currentStudent.value.student_code)
     if (idx >= 0) {
@@ -495,8 +497,6 @@ async function saveScore() {
         students.value[idx].letter = payload.data.letter_grade
       }
     }
-    
-    alert(payload.message || 'Lưu điểm thành công!')
   } catch (error) {
     errorMessage.value = 'Không kết nối được máy chủ.'
   }
@@ -566,6 +566,7 @@ async function saveWeights() {
 
       <p v-if="loading" class="state">Đang tải dữ liệu...</p>
       <p v-else-if="errorMessage" class="state error">{{ errorMessage }}</p>
+      <p v-if="successMessage" class="state success">{{ successMessage }}</p>
       <template v-else-if="course">
         <!-- Status Banner -->
         <div class="status-banner" :class="courseStatus">
@@ -704,7 +705,7 @@ async function saveWeights() {
                 </td>
                 
                 <td style="text-align: center;">
-                  <button v-if="isTeacher || isStaff" class="btn-ghost btn-sm" @click="openScoreModal(student)" :disabled="isReadOnly">
+                  <button v-if="isTeacher || isStaff" class="btn-ghost btn-sm" title="Nhập điểm" @click="openScoreModal(student)" :disabled="isReadOnly">
                     Nhập điểm
                   </button>
                 </td>
@@ -815,21 +816,21 @@ async function saveWeights() {
               <div class="score-form">
                 <div class="form-group">
                   <label>Điểm chuyên cần (CC)</label>
-                  <input v-model.number="scoreForm.cc" type="number" min="0" max="10" step="0.5" placeholder="0-10">
+                  <input v-model.number="scoreForm.cc" type="number" name="cc" min="0" max="10" step="0.5" placeholder="0-10">
                 </div>
 
                 <hr class="form-divider">
 
                 <div class="form-group">
                   <label>Điểm giữa kỳ (GK)</label>
-                  <input v-model.number="scoreForm.gk" type="number" min="0" max="10" step="0.5" placeholder="0-10">
+                  <input v-model.number="scoreForm.gk" type="number" name="gk" min="0" max="10" step="0.5" placeholder="0-10">
                 </div>
 
                 <hr class="form-divider">
 
                 <div class="form-group">
                   <label>Điểm cuối kỳ (CK)</label>
-                  <input v-model.number="scoreForm.ck" type="number" min="0" max="10" step="0.5" placeholder="0-10">
+                  <input v-model.number="scoreForm.ck" type="number" name="ck" min="0" max="10" step="0.5" placeholder="0-10">
                 </div>
               </div>
             </div>
@@ -907,7 +908,8 @@ h2 { margin-top: 22px; }
 .label-nowrap { white-space: nowrap; }
 .state { background: #f4f7fc; padding: 12px; border-radius: 8px; }
 .state.error { color: #c52a2a; background: #fdeeee; }
-.table-scroll { margin-top: 10px; overflow: auto; max-height: 320px; min-height: 0; }
+.state.success { color: #007336; background: #f0faf4; }
+.table-scroll { margin-top: 10px; }
 .result-table { width: 100%; border-collapse: collapse; }
 .result-table th, .result-table td { border-bottom: 1px solid #e3e9f2; padding: 10px 8px; text-align: left; }
 .result-table th { background: #f0f5fc; color: #2f4565; position: sticky; top: 0; z-index: 2; }

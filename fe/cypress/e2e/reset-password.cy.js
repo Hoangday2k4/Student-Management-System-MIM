@@ -10,7 +10,7 @@ describe('Reset Password (Admin Panel) E2E', () => {
     cy.fixture('auth/reset-list-pending.json').then((pendingList) => {
       let items = Cypress._.cloneDeep(pendingList.items)
 
-      cy.intercept('GET', '**/api/reset_list.php', () => ({ items })).as('resetList')
+      cy.intercept('GET', '**/api/reset_list.php', (req) => { req.reply({ statusCode: 200, body: { items } }) }).as('resetList')
       cy.intercept('POST', '**/api/reset_password.php', (req) => {
         const targetId = req.body?.admin_id
         items = items.filter((item) => item.id !== targetId)

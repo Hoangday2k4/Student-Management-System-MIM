@@ -216,6 +216,14 @@ class TeacherController
                 ], 409);
                 return;
             }
+            if (strpos($message, 'UNIQUE constraint failed: GiangVien.Email') !== false) {
+                jsonResponse([
+                    'status' => 'error',
+                    'message' => 'Email giao vien da ton tai.',
+                    'fields' => ['email' => 'Email da ton tai trong he thong.'],
+                ], 409);
+                return;
+            }
             if (strpos($message, 'UNIQUE constraint failed: TaiKhoan.LoginId') !== false) {
                 jsonResponse([
                     'status' => 'error',
