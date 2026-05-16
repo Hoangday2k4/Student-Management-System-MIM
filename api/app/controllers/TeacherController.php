@@ -596,7 +596,7 @@ class TeacherController
                 $row = $this->normalizeImportRow(is_array($raw) ? $raw : []);
                 $teacherCodeKey = strtolower($row['teacher_code']);
 
-                if ($row['teacher_code'] === '' || $row['full_name'] === '' || $row['department'] === '') {
+                if ($row['teacher_code'] === '' || $row['full_name'] === '') {
                     $skipped[] = ['line' => $line, 'teacher_code' => $row['teacher_code'], 'reason' => 'Thieu truong bat buoc'];
                     continue;
                 }
@@ -674,16 +674,21 @@ class TeacherController
             return;
         }
 
-        $payload = $_POST;
+        $rawInput = file_get_contents('php://input');
+        $jsonPayload = json_decode((string)$rawInput, true);
+        if (is_array($jsonPayload)) {
+            $payload = $jsonPayload;
+        } else {
+            $payload = $_POST;
+        }
         $fullName = trim((string)($payload['full_name'] ?? $current['full_name']));
-        $department = trim((string)($payload['department'] ?? $current['department']));
+        $department = trim((string)($payload['department'] ?? ($current['department'] ?? '')));
         $email = trim((string)($payload['email'] ?? ($current['email'] ?? '')));
         $gender = $this->normalizeGender((string)($payload['gender'] ?? ($current['gender'] ?? '')));
         $status = $this->normalizeStatus((string)($payload['status'] ?? ($current['status'] ?? '')));
 
         $errors = [];
         if ($fullName === '') $errors['full_name'] = 'Hay nhap ho ten.';
-        if ($department === '') $errors['department'] = 'Hay nhap khoa/bo mon.';
         if ($email !== '' && !filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Email khong hop le.';
         if ($gender === '') $errors['gender'] = 'Gioi tinh khong hop le.';
         if ($status === '') $errors['status'] = 'Trang thai khong hop le.';

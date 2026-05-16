@@ -264,8 +264,6 @@ class Student
     {
         self::ensureSchema();
         $pdo = get_db_connection();
-        // Verify class exists before updating student
-        self::verifyLopExists($pdo, (string)($data['class_name'] ?? ''));
         $stmt = $pdo->prepare(
             'UPDATE SinhVien
              SET HoTen = :ho_ten,

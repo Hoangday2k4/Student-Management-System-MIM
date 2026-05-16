@@ -620,14 +620,6 @@ class StudentController
                         $previewSkipped[] = ['line' => $line, 'student_code' => $studentCode, 'reason' => 'Da ton tai trong bang sinh vien'];
                         continue;
                     }
-                    
-                    // Validate class exists
-                    $classCheckStmt = $pdo->prepare('SELECT 1 FROM LopSinhHoat WHERE MaLop = :ma_lop LIMIT 1');
-                    $classCheckStmt->execute([':ma_lop' => trim((string)$row['class_name'])]);
-                    if (!$classCheckStmt->fetchColumn()) {
-                        $previewSkipped[] = ['line' => $line, 'student_code' => $studentCode, 'reason' => 'Lớp không tồn tại: ' . $row['class_name']];
-                        continue;
-                    }
 
                     $previewRows[] = $row;
                 }
@@ -646,7 +638,7 @@ class StudentController
         $payload = json_decode(file_get_contents('php://input'), true);
         $rows = is_array($payload['rows'] ?? null) ? $payload['rows'] : [];
         if (empty($rows)) {
-            jsonResponse(['status' => 'error', 'message' => 'Khong co du lieu de import.'], 400);
+            jsonResponse(['status' => 'success', 'inserted_count' => 0, 'skipped_count' => 0, 'skipped' => [], 'default_password' => '123456']);
             return;
         }
 
@@ -689,21 +681,8 @@ class StudentController
                 $savepoint = 'sp_student_import_' . $idx;
                 $pdo->exec('SAVEPOINT ' . $savepoint);
                 try {
-                    // Verify class exists before importing
-                    $className = trim((string)$row['class_name']);
-                    $classCheckStmt = $pdo->prepare('SELECT MaNganh FROM LopSinhHoat WHERE MaLop = :ma_lop LIMIT 1');
-                    $classCheckStmt->execute([':ma_lop' => $className]);
-                    $classResult = $classCheckStmt->fetch(PDO::FETCH_ASSOC);
-                    if (!$classResult) {
-                        throw new Exception("Lớp '$className' không tồn tại");
-                    }
-                    
-                    // If major is empty, resolve from class
                     $major = trim((string)$row['major']);
-                    if ($major === '' && isset($classResult['MaNganh'])) {
-                        $major = $classResult['MaNganh'];
-                    }
-                    
+
                     Student::insertWithPdo($pdo, [
                         'student_code' => $row['student_code'],
                         'full_name' => $row['full_name'],
@@ -741,13 +720,7 @@ class StudentController
                     $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
                     $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
                     $msg = (string)$rowError->getMessage();
-                    
-                    // Class not found - skip row
-                    if (strpos($msg, 'không tồn tại') !== false) {
-                        $skipped[] = ['line' => $line, 'student_code' => $row['student_code'], 'reason' => 'Lớp không tồn tại: ' . $row['class_name']];
-                        continue;
-                    }
-                    
+
                     // Handle PDO errors
                     if ($rowError instanceof PDOException) {
                         if (strpos($msg, 'UNIQUE constraint failed: SinhVien.MaSV') !== false) {
@@ -807,14 +780,19 @@ class StudentController
             return;
         }
 
-        $payload = $_POST;
+        $rawInput = file_get_contents('php://input');
+        $jsonPayload = json_decode((string)$rawInput, true);
+        if (is_array($jsonPayload)) {
+            $payload = $jsonPayload;
+        } else {
+            $payload = $_POST;
+        }
         $fullName = trim((string)($payload['full_name'] ?? $current['full_name']));
         $className = trim((string)($payload['class_name'] ?? $current['class_name']));
         $email = trim((string)($payload['email'] ?? ($current['email'] ?? '')));
         $gender = $this->normalizeGender((string)($payload['gender'] ?? ($current['gender'] ?? '')));
         $status = $this->normalizeStatus((string)($payload['status'] ?? ($current['status'] ?? '')));
         $major = trim((string)($payload['major'] ?? ($current['major'] ?? '')));
-        // Lưu ý: Kiểm tra tên biến 'faculty' hay 'major' đồng bộ với Frontend
         $phone = trim((string)($payload['phone'] ?? ($current['phone'] ?? '')));
         $errors = [];
         if ($fullName === '') $errors['full_name'] = 'Hay nhap ho ten.';
