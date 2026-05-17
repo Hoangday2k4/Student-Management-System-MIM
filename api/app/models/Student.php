@@ -15,6 +15,10 @@ class Student
 
     public static function ensureSchema(?PDO $pdo = null): void
     {
+        static $done = false;
+        if ($done) {
+            return;
+        }
         if (!$pdo) {
             $pdo = get_db_connection();
         }
@@ -71,6 +75,8 @@ class Student
             $pdo->exec('ALTER TABLE SinhVien ADD COLUMN CreatedAt TEXT');
             $pdo->exec("UPDATE SinhVien SET CreatedAt = datetime('now', 'localtime') WHERE CreatedAt IS NULL OR trim(CreatedAt) = ''");
         }
+
+        $done = true;
     }
 
     private static function resolveKhoaIdByName(PDO $pdo, string $faculty): ?string
