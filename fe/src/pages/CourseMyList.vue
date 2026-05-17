@@ -1,9 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { getAuth } from '../authStore.js'
 
-const router = useRouter()
 const loading = ref(true)
 const errorMessage = ref('')
 const rows = ref([])

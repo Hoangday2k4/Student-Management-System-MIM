@@ -96,17 +96,6 @@ const router = createRouter({
   routes,
 })
 
-async function parseJsonSafe(res) {
-  const raw = await res.text()
-  const text = raw.replace(/^\uFEFF/, '').trim()
-  if (!text) return null
-  try {
-    return JSON.parse(text)
-  } catch (e) {
-    return null
-  }
-}
-
 router.beforeEach(async (to, from, next) => {
   const publicPages = ['login', 'register', 'reset-password-request']
   if (publicPages.includes(to.name)) {

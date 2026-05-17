@@ -110,14 +110,6 @@ function makeActivity() {
 
 const activities = computed(makeActivity)
 
-async function fetchJson(url) {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(url)
-  const raw = await res.text()
-  const text = raw.replace(/^\uFEFF/, '').trim()
-  return text ? JSON.parse(text) : null
-}
-
 onMounted(async () => {
   try {
     const data = await getAuth()

@@ -5,7 +5,7 @@ async function _fetchAuth() {
   const res = await fetch('/api/home')
   if (!res.ok) throw new Error('unauthorized')
   const raw = await res.text()
-  const text = raw.replace(/^﻿/, '').trim()
+  const text = raw.replace(/^\uFEFF/, '').trim()
   return text ? JSON.parse(text) : null
 }
 

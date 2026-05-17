@@ -106,17 +106,6 @@ function isActive(itemKey) {
   return currentKey === itemKey
 }
 
-async function parseJsonSafe(res) {
-  const raw = await res.text()
-  const text = raw.replace(/^\uFEFF/, '').trim()
-  if (!text) return null
-  try {
-    return JSON.parse(text)
-  } catch (e) {
-    return null
-  }
-}
-
 async function loadPendingResetCount() {
   pendingResetCount.value = 0
   if (!isAdmin.value) return
