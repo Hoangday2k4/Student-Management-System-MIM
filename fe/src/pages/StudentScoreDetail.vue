@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { getAuth } from '../authStore.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -54,13 +55,10 @@ async function loadDetail() {
 }
 
 onMounted(async () => {
-  const homeRes = await fetch('/api/home').catch(() => null)
-  if (homeRes && homeRes.ok) {
-    const homeData = await homeRes.json().catch(() => ({}))
-    if ((homeData.account_type || '') !== 'student') {
-      router.replace('/')
-      return
-    }
+  const homeData = await getAuth().catch(() => null)
+  if ((homeData?.account_type || '') !== 'student') {
+    router.replace('/')
+    return
   }
   await loadDetail()
 })

@@ -20,16 +20,16 @@ class CourseController
 
         $teachers = [];
         $teacherRows = $pdo->query(
-            'SELECT g.MaGV, g.HoTen, g.MaNganh, k.TenKhoa, g.TrangThai
+            'SELECT g.MaGV, g.HoTen, g.MaKhoa, k.TenKhoa, g.TrangThai
              FROM GiangVien g
-             LEFT JOIN Khoa k ON k.MaKhoa = g.MaNganh
+             LEFT JOIN Khoa k ON k.MaKhoa = g.MaKhoa
              ORDER BY g.MaGV ASC'
         )->fetchAll(PDO::FETCH_ASSOC) ?: [];
         foreach ($teacherRows as $row) {
             $teachers[] = [
                 'teacher_code' => trim((string)($row['MaGV'] ?? '')),
                 'full_name' => trim((string)($row['HoTen'] ?? '')),
-                'department_code' => trim((string)($row['MaNganh'] ?? '')),
+                'department_code' => trim((string)($row['MaKhoa'] ?? '')),
                 'department_name' => trim((string)($row['TenKhoa'] ?? '')),
                 'status' => trim((string)($row['TrangThai'] ?? '')),
             ];

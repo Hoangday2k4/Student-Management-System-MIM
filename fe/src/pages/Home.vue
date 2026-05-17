@@ -1,6 +1,7 @@
 ﻿<script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { getAuth } from '../authStore.js'
 
 const loginInfo = ref({ login_id: '', login_time: '', account_type: '' })
 const router = useRouter()
@@ -119,7 +120,7 @@ async function fetchJson(url) {
 
 onMounted(async () => {
   try {
-    const data = await fetchJson('/api/home')
+    const data = await getAuth()
     if (!data?.login_id) {
       router.replace('/login')
       return
@@ -128,10 +129,10 @@ onMounted(async () => {
 
     if (String(data.account_type || '').toLowerCase() === 'staff' || ['admin', 'manager'].includes(String(data.login_id || '').toLowerCase())) {
       const [studentRows, teacherRows, courseRows, meta] = await Promise.all([
-        fetchJson('/api/students').catch(() => []),
-        fetchJson('/api/teachers').catch(() => []),
-        fetchJson('/api/courses').catch(() => []),
-        fetchJson('/api/courses?action=meta').catch(() => null),
+        fetch('/api/students').then(r => r.json()).catch(() => []),
+        fetch('/api/teachers').then(r => r.json()).catch(() => []),
+        fetch('/api/courses').then(r => r.json()).catch(() => []),
+        fetch('/api/courses?action=meta').then(r => r.json()).catch(() => null),
       ])
       students.value = Array.isArray(studentRows) ? studentRows : []
       teachers.value = Array.isArray(teacherRows) ? teacherRows : []

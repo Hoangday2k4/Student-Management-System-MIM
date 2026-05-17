@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { getAuth } from '../authStore.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -266,14 +267,9 @@ async function submitBulkImport() {
 
 onMounted(async () => {
   try {
-    const res = await fetch('/api/home')
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok || !data.login_id) {
-      router.replace({ name: 'login' })
-      return
-    }
-    const role = String(data.account_type || '').toLowerCase()
-    canCreate.value = role === 'staff' || ['admin', 'manager'].includes(String(data.login_id || '').toLowerCase())
+    const data = await getAuth()
+    const role = String(data?.account_type || '').toLowerCase()
+    canCreate.value = role === 'staff' || ['admin', 'manager'].includes(String(data?.login_id || '').toLowerCase())
   } catch (error) {
     router.replace({ name: 'login' })
     return

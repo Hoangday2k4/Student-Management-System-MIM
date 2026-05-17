@@ -1,12 +1,11 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { getAuth } from '../authStore.js'
 
 async function checkStaffRole() {
-  const res = await fetch('/api/home').catch(() => null)
-  if (!res || !res.ok) return false
-  const data = await res.json().catch(() => ({}))
-  return (data.account_type || '') === 'staff'
+  const data = await getAuth().catch(() => null)
+  return (data?.account_type || '') === 'staff'
 }
 
 const router = useRouter()

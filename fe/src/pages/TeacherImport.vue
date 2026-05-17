@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { getAuth } from '../authStore.js'
 
 const router = useRouter()
 const fileInput = ref(null)
@@ -14,15 +15,10 @@ const saveResult = ref(null)
 const errorMessage = ref('')
 
 onMounted(async () => {
-  const homeRes = await fetch('/api/home').catch(() => null)
-  if (homeRes && homeRes.ok) {
-    const homeData = await homeRes.json().catch(() => ({}))
-    if ((homeData.account_type || '') !== 'staff') {
-      router.replace('/')
-      return
-    }
-  } else {
+  const homeData = await getAuth().catch(() => null)
+  if (!homeData || (homeData.account_type || '') !== 'staff') {
     router.replace('/')
+    return
   }
 })
 

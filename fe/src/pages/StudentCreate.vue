@@ -1,6 +1,7 @@
 ﻿<script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { getAuth } from '../authStore.js'
 
 const router = useRouter()
 const step = ref('input') // input | confirm | done | bulk-confirm | bulk-done
@@ -113,14 +114,9 @@ function handleClassInputBlur() {
 
 onMounted(async () => {
   try {
-    const res = await fetch('/api/home')
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok || !data.login_id) {
-      router.replace('/login')
-      return
-    }
-    const role = String(data.account_type || '').toLowerCase()
-    canCreate.value = role === 'staff' || ['admin', 'manager'].includes(String(data.login_id || '').toLowerCase())
+    const data = await getAuth()
+    const role = String(data?.account_type || '').toLowerCase()
+    canCreate.value = role === 'staff' || ['admin', 'manager'].includes(String(data?.login_id || '').toLowerCase())
 
     await loadClassesData()
   } catch (error) {

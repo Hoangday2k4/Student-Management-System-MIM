@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { getAuth } from '../authStore.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -172,14 +173,9 @@ async function loadOptionsAndEdit() {
 
 async function checkPermission() {
   try {
-    const res = await fetch('/api/home')
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok || !data.login_id) {
-      router.replace('/login')
-      return
-    }
-    const role = String(data.account_type || '').toLowerCase()
-    canCreate.value = role === 'staff' || ['admin', 'manager'].includes(String(data.login_id || '').toLowerCase())
+    const data = await getAuth()
+    const role = String(data?.account_type || '').toLowerCase()
+    canCreate.value = role === 'staff' || ['admin', 'manager'].includes(String(data?.login_id || '').toLowerCase())
     if (!canCreate.value) return
     await loadOptionsAndEdit()
   } catch (error) {

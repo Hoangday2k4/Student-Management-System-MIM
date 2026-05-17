@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { getAuth } from '../authStore.js'
 
 const router = useRouter()
 const loading = ref(true)
@@ -125,13 +126,8 @@ async function loadData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const homeRes = await fetch('/api/home')
-    if (!homeRes.ok) {
-      router.replace('/login')
-      return
-    }
-    const home = await homeRes.json().catch(() => ({}))
-    if (String(home.account_type || '').toLowerCase() !== 'student') {
+    const home = await getAuth()
+    if (String(home?.account_type || '').toLowerCase() !== 'student') {
       router.replace('/')
       return
     }

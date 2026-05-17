@@ -1,6 +1,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { getAuth } from '../authStore.js'
 
 const router = useRouter()
 const step = ref('input') // input | confirm | done | bulk-confirm | bulk-done
@@ -37,14 +38,9 @@ const errors = reactive({
 
 onMounted(async () => {
   try {
-    const res = await fetch('/api/home')
-    const data = await res.json().catch(() => ({}))
-    if (!res.ok || !data.login_id) {
-      router.replace('/login')
-      return
-    }
-    const role = String(data.account_type || '').toLowerCase()
-    canCreate.value = role === 'staff' || ['admin', 'manager'].includes(String(data.login_id || '').toLowerCase())
+    const data = await getAuth()
+    const role = String(data?.account_type || '').toLowerCase()
+    canCreate.value = role === 'staff' || ['admin', 'manager'].includes(String(data?.login_id || '').toLowerCase())
     await loadFaculties()
   } catch (error) {
     router.replace('/login')

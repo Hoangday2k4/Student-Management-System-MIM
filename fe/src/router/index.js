@@ -1,4 +1,5 @@
 ﻿import { createRouter, createWebHistory } from 'vue-router'
+import { getAuth } from '../authStore.js'
 import PortalLayout from '../layouts/PortalLayout.vue'
 import Home from '../pages/Home.vue'
 import Login from '../pages/Login.vue'
@@ -114,13 +115,10 @@ router.beforeEach(async (to, from, next) => {
   }
 
   try {
-    const res = await fetch('/api/home')
-    if (res.ok) {
-      const data = await parseJsonSafe(res)
-      if (data.login_id) {
-        next()
-        return
-      }
+    const data = await getAuth()
+    if (data?.login_id) {
+      next()
+      return
     }
   } catch (e) {
     // ignore

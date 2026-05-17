@@ -1,6 +1,7 @@
 ﻿<script setup>
 import { computed, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
+import { getAuth, clearAuth } from '../authStore.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -132,12 +133,7 @@ async function loadPendingResetCount() {
 
 onMounted(async () => {
   try {
-    const res = await fetch('/api/home')
-    if (!res.ok) {
-      router.replace({ name: 'login' })
-      return
-    }
-    const data = await parseJsonSafe(res)
+    const data = await getAuth()
     if (!data?.login_id) {
       router.replace({ name: 'login' })
       return
@@ -168,6 +164,7 @@ async function handleLogout() {
   } catch (error) {
     // ignore
   }
+  clearAuth()
   router.replace({ name: 'login' })
 }
 </script>

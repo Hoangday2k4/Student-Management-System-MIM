@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { getAuth } from '../authStore.js'
 
 const router = useRouter()
 
@@ -87,9 +88,7 @@ function openCreate() {
 
 async function loadIdentity() {
   try {
-    const res = await fetch('/api/home')
-    if (!res.ok) return
-    const data = await res.json().catch(() => ({}))
+    const data = await getAuth()
     isAdmin.value = String(data?.login_id || '').toLowerCase() === 'admin'
   } catch {
     isAdmin.value = false
