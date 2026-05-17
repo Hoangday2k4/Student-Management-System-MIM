@@ -1,22 +1,27 @@
 name: CD — Deploy to Production
 
 on:
-  push:
-    branches: [main]
-  workflow_dispatch:   
+  workflow_run:
+    workflows: ["CI"]
+    types:
+      - completed
+
+  workflow_dispatch:
 
 jobs:
   deploy:
-    name: SSH Deploy 
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+
+    name: SSH Deploy
     runs-on: ubuntu-latest
 
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.2.0
         with:
-          host: 118.70.176.240
-          username: mimsms
-          port: 2218
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          port: ${{ secrets.SERVER_PORT }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           debug: true
           command_timeout: 30m
@@ -27,4 +32,3 @@ jobs:
             git reset --hard origin/main
             chmod +x deploy.sh
             ./deploy.sh
-            
