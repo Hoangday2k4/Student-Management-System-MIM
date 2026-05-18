@@ -22,7 +22,7 @@ describe('Public routes E2E', () => {
 
   it('request reset flow shows success and returns to login', () => {
     cy.fixture('auth/request-reset-success.json').then((body) => {
-      cy.intercept('POST', '**/api/request_reset.php', body).as('requestReset')
+      cy.intercept('POST', '**/api/request_reset', body).as('requestReset')
 
       cy.visit('/reset-password-request')
 

@@ -11,7 +11,7 @@ describe('Reset Password (Admin Panel) E2E', () => {
       let items = Cypress._.cloneDeep(pendingList.items)
 
       cy.intercept('GET', '**/api/reset_list.php', (req) => { req.reply({ statusCode: 200, body: { items } }) }).as('resetList')
-      cy.intercept('POST', '**/api/reset_password.php', (req) => {
+      cy.intercept('POST', '**/api/reset_password', (req) => {
         const targetId = req.body?.admin_id
         items = items.filter((item) => item.id !== targetId)
         req.reply({ statusCode: 200, body: { success: true, default_password: '123456' } })
@@ -61,7 +61,7 @@ describe('Reset Password (Admin Panel) E2E', () => {
     cy.mockHomeAsAdmin()
     cy.fixture('auth/reset-list-pending.json').then((pendingList) => {
       cy.intercept('GET', '**/api/reset_list.php', pendingList).as('resetList')
-      cy.intercept('POST', '**/api/reset_password.php', {
+      cy.intercept('POST', '**/api/reset_password', {
         statusCode: 400,
         body: { success: false, error: 'Reset thất bại.' },
       }).as('doResetFail')

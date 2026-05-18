@@ -5,7 +5,7 @@ describe('Negative and authorization paths E2E', () => {
 
   it('shows server field error on request reset failure', () => {
     cy.fixture('errors/request-reset-fail.json').then((body) => {
-      cy.intercept('POST', '**/api/request_reset.php', {
+      cy.intercept('POST', '**/api/request_reset', {
         statusCode: 400,
         body,
       }).as('requestResetFail')
