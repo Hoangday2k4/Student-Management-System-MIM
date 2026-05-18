@@ -40,7 +40,7 @@ const submit = async () => {
 
   try {
     const apiBase = import.meta.env.VITE_API_BASE || '/api'
-    const response = await fetch(`${apiBase}/request_reset.php`, {
+    const response = await fetch(`${apiBase}/request_reset`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ login_id: form.login_id.trim() }),

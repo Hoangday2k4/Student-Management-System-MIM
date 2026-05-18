@@ -55,7 +55,7 @@ const submitRow = async (row) => {
   row.submitting = true
 
   try {
-    const response = await fetch(`${apiBase}/reset_password.php`, {
+    const response = await fetch(`${apiBase}/reset_password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ admin_id: row.id }),
