@@ -118,6 +118,17 @@ class Student
         self::ensureSchema($pdo);
         self::ensureLop($pdo, (string)($data['class_name'] ?? ''), (string)($data['faculty'] ?? ''));
 
+        // Nếu không có ngành được cung cấp, lấy MaNganh từ lớp đã được tạo/tồn tại
+        $maNganh = trim((string)($data['major'] ?? '')) ?: null;
+        if ($maNganh === null && !empty($data['class_name'])) {
+            $lopStmt = $pdo->prepare('SELECT MaNganh FROM LopSinhHoat WHERE MaLop = :ma_lop LIMIT 1');
+            $lopStmt->execute([':ma_lop' => trim((string)$data['class_name'])]);
+            $fetched = $lopStmt->fetchColumn();
+            if ($fetched !== false && $fetched !== '') {
+                $maNganh = (string)$fetched;
+            }
+        }
+
         $stmt = $pdo->prepare(
             'INSERT INTO SinhVien (
                 MaSV, HoTen, NgaySinh, GioiTinh, CCCD, DiaChi, SoDienThoai, Email, MaLop, MaNganh, NgayNhapHoc, TrangThai, Avatar, CreatedAt
@@ -135,7 +146,7 @@ class Student
             ':so_dien_thoai' => $data['phone'] ?: null,
             ':email' => $data['email'] ?: null,
             ':ma_lop' => $data['class_name'] ?: null,
-            ':ma_nganh' => trim((string)($data['major'] ?? '')) ?: null,
+            ':ma_nganh' => $maNganh,
             ':ngay_nhap_hoc' => trim((string)($data['admission_date'] ?? '')) ?: null,
             ':trang_thai' => $data['status'] ?: 'Đang học',
             ':avatar' => $data['avatar'] ?: null,
@@ -197,14 +208,17 @@ class Student
     self::ensureSchema();
     $pdo = get_db_connection();
 
-    $sql = 'SELECT s.*, 
-                   n.TenNganh, 
-                   k.TenKhoa
+    $sql = 'SELECT s.*,
+                   COALESCE(n.TenNganh, n2.TenNganh) AS TenNganh,
+                   COALESCE(k.TenKhoa, k2.TenKhoa) AS TenKhoa
             FROM SinhVien s
             LEFT JOIN Nganh n ON n.MaNganh = s.MaNganh
             LEFT JOIN Khoa k ON k.MaKhoa = n.MaKhoa
+            LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
+            LEFT JOIN Nganh n2 ON n2.MaNganh = l.MaNganh
+            LEFT JOIN Khoa k2 ON k2.MaKhoa = n2.MaKhoa
             WHERE 1=1';
-    
+
     $params = [];
 
     if (!empty($filters['keyword'])) {
@@ -212,8 +226,8 @@ class Student
             lower(s.MaSV) LIKE :keyword
             OR lower(s.HoTen) LIKE :keyword
             OR lower(s.MaLop) LIKE :keyword
-            OR lower(IFNULL(n.TenNganh,"")) LIKE :keyword
-            OR lower(IFNULL(k.TenKhoa,"")) LIKE :keyword
+            OR lower(IFNULL(n.TenNganh, IFNULL(n2.TenNganh, ""))) LIKE :keyword
+            OR lower(IFNULL(k.TenKhoa, IFNULL(k2.TenKhoa, ""))) LIKE :keyword
             OR lower(IFNULL(s.Email,"")) LIKE :keyword
         )';
         $params[':keyword'] = '%' . self::lowerText((string)$filters['keyword']) . '%';
@@ -225,8 +239,12 @@ class Student
     }
 
     if (!empty($filters['faculty'])) {
-        // Tìm kiếm theo tên khoa hoặc tên ngành
-        $sql .= ' AND (lower(IFNULL(k.TenKhoa,"")) LIKE :faculty OR lower(IFNULL(n.TenNganh,"")) LIKE :faculty)';
+        $sql .= ' AND (
+            lower(IFNULL(k.TenKhoa,"")) LIKE :faculty
+            OR lower(IFNULL(k2.TenKhoa,"")) LIKE :faculty
+            OR lower(IFNULL(n.TenNganh,"")) LIKE :faculty
+            OR lower(IFNULL(n2.TenNganh,"")) LIKE :faculty
+        )';
         $params[':faculty'] = '%' . self::lowerText((string)$filters['faculty']) . '%';
     }
 
