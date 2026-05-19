@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -12,6 +12,7 @@ const loadedCode = ref('')
 const classes = ref([])
 const loadingClasses = ref(false)
 const showSuggestions = ref(false)
+const dataLoaded = ref(false)
 
 const form = reactive({
   student_code: '',
@@ -183,6 +184,7 @@ async function loadClassesData() {
 }
 
 watch(() => form.class_name, (newClassName) => {
+  if (!dataLoaded.value) return
   const selected = classes.value.find((c) => c.code === newClassName)
   if (selected) {
     form.major = selected.major_code
@@ -221,6 +223,8 @@ function handleClassInputBlur() {
 onMounted(async () => {
   await loadClassesData()
   await loadDetail()
+  await nextTick()
+  dataLoaded.value = true
 })
 </script>
 

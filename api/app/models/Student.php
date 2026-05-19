@@ -250,13 +250,16 @@ class Student
         self::ensureSchema();
         $pdo = get_db_connection();
        $stmt = $pdo->prepare(
-        'SELECT 
-            s.*, 
-            n.TenNganh, 
-            k.TenKhoa
+        'SELECT
+            s.*,
+            COALESCE(n.TenNganh, n2.TenNganh) AS TenNganh,
+            COALESCE(k.TenKhoa, k2.TenKhoa) AS TenKhoa
          FROM SinhVien s
          LEFT JOIN Nganh n ON n.MaNganh = s.MaNganh
          LEFT JOIN Khoa k ON k.MaKhoa = n.MaKhoa
+         LEFT JOIN LopSinhHoat l ON l.MaLop = s.MaLop
+         LEFT JOIN Nganh n2 ON n2.MaNganh = l.MaNganh
+         LEFT JOIN Khoa k2 ON k2.MaKhoa = n2.MaKhoa
          WHERE lower(s.MaSV) = lower(:code)
          LIMIT 1'
 );
